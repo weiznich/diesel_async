@@ -4,6 +4,9 @@ use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures::future::BoxFuture;
 use futures::Stream;
+#[cfg(feature = "deadpool")]
+mod deadpool;
+pub use self::deadpool::{AsyncConnectionManager, DeadpoolConnection};
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
