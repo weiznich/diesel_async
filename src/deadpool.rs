@@ -40,7 +40,7 @@ unsafe impl<C: Send> Sync for ConnectionManager<C> {}
 
 impl<C: AsyncConnection> fmt::Debug for ConnectionManager<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "AsyncConnectionManager<{}>", std::any::type_name::<C>())
+        write!(f, "ConnectionManager<{}>", std::any::type_name::<C>())
     }
 }
 
