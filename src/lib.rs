@@ -4,9 +4,6 @@ use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures::future::BoxFuture;
 use futures::Stream;
-#[cfg(feature = "deadpool")]
-mod deadpool;
-pub use self::deadpool::{AsyncConnectionManager, DeadpoolConnection};
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -14,6 +11,11 @@ mod pg;
 mod run_query_dsl;
 mod stmt_cache;
 mod transaction_manager;
+
+// TODO: different style than other modules,
+// but looks to much to be re-exported in the root
+#[cfg(feature = "deadpool")]
+pub mod deadpool;
 
 #[cfg(feature = "mysql")]
 pub use self::mysql::AsyncMysqlConnection;

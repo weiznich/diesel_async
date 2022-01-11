@@ -34,3 +34,8 @@ postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt-mult
 name = "integration_tests"
 path = "tests/lib.rs"
 harness = true
+
+[[test]]
+name = "pooling_tests"
+path = "tests/deadpool.rs"
+harness = true
