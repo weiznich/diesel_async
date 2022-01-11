@@ -228,29 +228,3 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-#[cfg(test)]
-mod tests {
-
-    #[cfg(feature = "postgres")]
-    #[tokio::test]
-    async fn example() {
-        use crate::{
-            deadpool::{ConnectionManager, Pool},
-            AsyncConnection, AsyncPgConnection,
-        };
-
-        let db_url = std::env::var("DATABASE_URL").expect("unable var");
-
-        let manager = ConnectionManager::<AsyncPgConnection>::new(db_url);
-
-        let pool = Pool::builder(manager)
-            .max_size(100)
-            .build()
-            .expect("unable build");
-
-        let mut conn = pool.get().await.expect("unable get");
-
-        conn.execute("SELECT 1").await.expect("unable execute");
-    }
-}
