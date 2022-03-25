@@ -78,7 +78,7 @@ async fn test_basic_insert_and_load() -> QueryResult<()> {
 }
 
 #[cfg(feature = "mysql")]
-async fn setup(connection: &mut TestConnection) -> TestConnection {
+async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
         "CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
@@ -91,7 +91,7 @@ async fn setup(connection: &mut TestConnection) -> TestConnection {
 }
 
 #[cfg(feature = "postgres")]
-async fn setup(connection: &mut TestConnection) -> TestConnection {
+async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
         "CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
