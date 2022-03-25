@@ -20,6 +20,7 @@ pub use self::run_query_dsl::*;
 pub use self::stmt_cache::StmtCache;
 pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 
+
 #[async_trait::async_trait]
 pub trait SimpleAsyncConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()>;
@@ -39,8 +40,6 @@ where
     type TransactionManager: TransactionManager<Self>;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self>;
-
-    async fn execute(&mut self, query: &str) -> QueryResult<usize>;
 
     async fn load<'a, T>(
         &'a mut self,

@@ -4,14 +4,14 @@ use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{
     AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
 };
-use diesel::connection::MaybeCached;
+use diesel::connection::statement_cache::MaybeCached;
 use diesel::mysql::{Mysql, MysqlType};
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
 use diesel::QueryResult;
 use futures::{Future, Stream, StreamExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
-use mysql_async::{Opts, OptsBuilder, Params, Statement};
+use mysql_async::{Opts, OptsBuilder, Statement};
 
 mod error_helper;
 mod row;
@@ -68,16 +68,6 @@ impl AsyncConnection for AsyncMysqlConnection {
         })
     }
 
-    async fn execute(&mut self, query: &str) -> diesel::QueryResult<usize> {
-        let stmt = self.conn.prep(query).await.map_err(ErrorHelper)?;
-        self.conn
-            .exec_drop(stmt, Params::Empty)
-            .await
-            .map_err(ErrorHelper)?;
-
-        Ok(self.conn.affected_rows() as usize)
-    }
-
     async fn load<'a, T>(
         &'a mut self,
         source: T,
@@ -94,7 +84,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             let stream = res
                 .stream_and_drop::<MysqlRow>()
                 .await
-                .map_err(|e| ErrorHelper(e))?
+                .map_err(ErrorHelper)?
                 .ok_or_else(|| {
                     diesel::result::Error::DeserializationError(Box::new(
                         diesel::result::UnexpectedEndOfRow,
@@ -132,7 +122,7 @@ impl PrepareCallback<Statement, MysqlType> for mysql_async::Conn {
         &mut self,
         sql: &str,
         _metadata: &[MysqlType],
-        _is_for_cache: diesel::connection::PrepareForCache,
+        _is_for_cache: diesel::connection::statement_cache::PrepareForCache,
     ) -> QueryResult<Statement> {
         Ok(self.prep(sql).await.map_err(ErrorHelper)?)
     }
@@ -140,6 +130,7 @@ impl PrepareCallback<Statement, MysqlType> for mysql_async::Conn {
 
 impl AsyncMysqlConnection {
     pub async fn try_from(conn: mysql_async::Conn) -> ConnectionResult<Self> {
+        use crate::run_query_dsl::RunQueryDsl;
         let mut conn = AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
@@ -155,7 +146,7 @@ impl AsyncMysqlConnection {
         ];
 
         for stmt in setup_statements {
-            conn.execute(stmt)
+            diesel::sql_query(stmt).execute(&mut conn)
                 .await
                 .map_err(ConnectionError::CouldntSetupConfiguration)?;
         }
@@ -173,7 +164,7 @@ impl AsyncMysqlConnection {
         F: Future<Output = QueryResult<R>>,
     {
         let mut bind_collector = RawBytesBindCollector::<Mysql>::new();
-        query.collect_binds(&mut bind_collector, &mut ())?;
+        query.collect_binds(&mut bind_collector, &mut (), &Mysql)?;
 
         let binds = bind_collector.binds;
         let metadata = bind_collector.metadata;
@@ -189,7 +180,7 @@ impl AsyncMysqlConnection {
 
         let stmt = {
             let stmt = stmt_cache
-                .cached_prepared_statement(query, &metadata, conn)
+                .cached_prepared_statement(query, &metadata, conn, &Mysql)
                 .await?;
             stmt
         };
@@ -200,6 +191,7 @@ impl AsyncMysqlConnection {
                 last_stmt.as_ref().unwrap()
             }
             MaybeCached::Cached(s) => s,
+            _ => unreachable!("We've opted into breaking diesel changes and want to know if things break because someone added a new variant here")
         };
 
         callback(&mut self.conn, stmt, ToSqlHelper { metadata, binds }).await

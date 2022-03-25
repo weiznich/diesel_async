@@ -36,16 +36,9 @@ pub trait TransactionManager<Conn: AsyncConnection> {
     fn get_transaction_depth(conn: &mut Conn) -> u32;
 }
 
+#[derive(Default)]
 pub struct AnsiTransactionManager {
     transaction_depth: i32,
-}
-
-impl Default for AnsiTransactionManager {
-    fn default() -> Self {
-        Self {
-            transaction_depth: 0,
-        }
-    }
 }
 
 impl AnsiTransactionManager {
