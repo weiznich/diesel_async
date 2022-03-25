@@ -77,9 +77,36 @@ async fn test_basic_insert_and_load() -> QueryResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "mysql")]
+async fn setup(connection: &mut TestConnection) -> TestConnection {
+    diesel::sql_query(
+        "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                name TEXT NOT NULL
+            ) CHARACTER SET utf8mb4",
+    )
+    .execute(&mut connection)
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "postgres")]
+async fn setup(connection: &mut TestConnection) -> TestConnection {
+    diesel::sql_query(
+        "CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR NOT NULL
+            )",
+    )
+    .execute(&mut connection)
+    .await
+    .unwrap();
+}
+
 async fn connection() -> TestConnection {
     let db_url = std::env::var("DATABASE_URL").unwrap();
     let mut conn = TestConnection::establish(&db_url).await.unwrap();
     conn.begin_test_transaction().await.unwrap();
+    setup(&mut conn);
     conn
 }

@@ -146,7 +146,8 @@ impl AsyncMysqlConnection {
         ];
 
         for stmt in setup_statements {
-            diesel::sql_query(stmt).execute(&mut conn)
+            diesel::sql_query(stmt)
+                .execute(&mut conn)
                 .await
                 .map_err(ConnectionError::CouldntSetupConfiguration)?;
         }

@@ -207,8 +207,12 @@ impl AsyncPgConnection {
     async fn set_config_options(&mut self) -> QueryResult<()> {
         use crate::run_query_dsl::RunQueryDsl;
 
-        diesel::sql_query("SET TIME ZONE 'UTC'").execute(self).await?;
-        diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'").execute(self).await?;
+        diesel::sql_query("SET TIME ZONE 'UTC'")
+            .execute(self)
+            .await?;
+        diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'")
+            .execute(self)
+            .await?;
         Ok(())
     }
 
@@ -232,9 +236,7 @@ impl AsyncPgConnection {
             let res = query.collect_binds(&mut bind_collector, self, &diesel::pg::Pg);
 
             if !self.next_lookup.is_empty() {
-                for (schema, lookup_type_name) in
-                    std::mem::take(&mut self.next_lookup)
-                {
+                for (schema, lookup_type_name) in std::mem::take(&mut self.next_lookup) {
                     // as this is an async call and we don't want to infect the whole diesel serialization
                     // api with async we just error out in the `PgMetadataLookup` implementation below if we encounter
                     // a type that is not cached yet
