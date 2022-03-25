@@ -85,7 +85,7 @@ async fn setup(connection: &mut TestConnection) -> TestConnection {
                 name TEXT NOT NULL
             ) CHARACTER SET utf8mb4",
     )
-    .execute(&mut connection)
+    .execute(connection)
     .await
     .unwrap();
 }
@@ -98,7 +98,7 @@ async fn setup(connection: &mut TestConnection) -> TestConnection {
                 name VARCHAR NOT NULL
             )",
     )
-    .execute(&mut connection)
+    .execute(connection)
     .await
     .unwrap();
 }
