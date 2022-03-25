@@ -107,6 +107,6 @@ async fn connection() -> TestConnection {
     let db_url = std::env::var("DATABASE_URL").unwrap();
     let mut conn = TestConnection::establish(&db_url).await.unwrap();
     conn.begin_test_transaction().await.unwrap();
-    setup(&mut conn);
+    setup(&mut conn).await;
     conn
 }
