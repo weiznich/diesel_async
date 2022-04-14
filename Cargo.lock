@@ -341,14 +341,14 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=d8bb571#d8bb5719a131a74d70f44a30eb48d447cec1cc8e"
+version = "2.0.0-rc.0"
+source = "git+https://github.com/weiznich/diesel?rev=9b4179e01ee96bd585cf306f64359971ee9ece44#9b4179e01ee96bd585cf306f64359971ee9ece44"
 dependencies = [
  "bitflags",
  "byteorder",
  "chrono",
  "diesel_derives",
- "itoa 0.4.8",
+ "itoa",
 ]
 
 [[package]]
@@ -368,8 +368,8 @@ dependencies = [
 
 [[package]]
 name = "diesel_derives"
-version = "2.0.0"
-source = "git+https://github.com/diesel-rs/diesel?rev=d8bb571#d8bb5719a131a74d70f44a30eb48d447cec1cc8e"
+version = "2.0.0-rc.0"
+source = "git+https://github.com/weiznich/diesel?rev=9b4179e01ee96bd585cf306f64359971ee9ece44#9b4179e01ee96bd585cf306f64359971ee9ece44"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -693,12 +693,6 @@ checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "itoa"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 
 [[package]]
 name = "itoa"
@@ -1460,7 +1454,7 @@ version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcbd0344bc6533bc7ec56df11d42fb70f1b912351c0825ccb7211b59d8af7cf5"
 dependencies = [
- "itoa 1.0.1",
+ "itoa",
  "ryu",
  "serde",
 ]
