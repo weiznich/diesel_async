@@ -21,7 +21,7 @@ mysql_common = {version = "0.28.0", optional = true}
 tokio = {version = "1.12.0", features = ["rt", "macros"]}
 cfg-if = "1"
 chrono = "0.4"
-diesel = { git = "https://github.com/weiznich/diesel", rev = "9b4179e01ee96bd585cf306f64359971ee9ece44", default-features = false,  features = ["chrono"]}
+diesel = { git = "https://github.com/diesel/diesel", rev = "4d8fc5c6d4d632c00ee997edd593b0d7ec60f8dd", default-features = false,  features = ["chrono"]}
 
 [features]
 default = ["postgres", "mysql"]
