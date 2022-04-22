@@ -78,7 +78,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             + diesel::query_builder::QueryId
             + Send,
     {
-        self.with_preapared_statement(source.as_query(), |conn, stmt, binds| async move {
+        self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
             let res = conn.exec_iter(&*stmt, binds).await.map_err(ErrorHelper)?;
 
             let stream = res
@@ -104,7 +104,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             + diesel::query_builder::QueryId
             + Send,
     {
-        self.with_preapared_statement(source, |conn, stmt, binds| async move {
+        self.with_prepared_statement(source, |conn, stmt, binds| async move {
             conn.exec_drop(&*stmt, binds).await.map_err(ErrorHelper)?;
             Ok(conn.affected_rows() as usize)
         })
@@ -155,7 +155,7 @@ impl AsyncMysqlConnection {
         Ok(conn)
     }
 
-    async fn with_preapared_statement<'a, T, F, R>(
+    async fn with_prepared_statement<'a, T, F, R>(
         &'a mut self,
         query: T,
         callback: impl FnOnce(&'a mut mysql_async::Conn, &'a Statement, ToSqlHelper) -> F,

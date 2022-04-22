@@ -86,7 +86,7 @@ impl AsyncConnection for AsyncPgConnection {
         T: AsQuery + Send,
         T::Query: QueryFragment<Self::Backend> + QueryId + Send,
     {
-        self.with_preapared_statement(source.as_query(), |conn, stmt, binds| async move {
+        self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
             let res = conn.query_raw(&*stmt, binds).await.map_err(ErrorHelper)?;
 
             Ok(res
@@ -101,7 +101,7 @@ impl AsyncConnection for AsyncPgConnection {
     where
         T: QueryFragment<Self::Backend> + QueryId + Send,
     {
-        self.with_preapared_statement(source, |conn, stmt, binds| async move {
+        self.with_prepared_statement(source, |conn, stmt, binds| async move {
             let binds = binds
                 .iter()
                 .map(|b| b as &(dyn ToSql + Sync))
@@ -216,7 +216,7 @@ impl AsyncPgConnection {
         Ok(())
     }
 
-    async fn with_preapared_statement<'a, T, F, R>(
+    async fn with_prepared_statement<'a, T, F, R>(
         &'a mut self,
         query: T,
         callback: impl FnOnce(
