@@ -53,9 +53,12 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
         Self: diesel::row::RowIndex<I>,
     {
         let idx = diesel::row::RowIndex::idx(self, idx)?;
-        let value = self.0.as_ref(idx)?;
+        let value = dbg!(self.0.as_ref(idx))?;
         let column = &self.0.columns_ref()[idx];
-        let buffer = match value {
+        dbg!(column.column_type());
+        dbg!(column.flags());
+        dbg!(column);
+        let buffer = match dbg!(value) {
             Value::NULL => None,
             Value::Bytes(b) => {
                 // deserialize gets the length prepended, so we just use that buffer
