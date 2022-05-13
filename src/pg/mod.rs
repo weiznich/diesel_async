@@ -1,6 +1,6 @@
-use diesel::connection::{MaybeCached, PrepareForCache};
+use diesel::connection::statement_cache::{MaybeCached, PrepareForCache};
 use diesel::pg::{
-    FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata,
+    FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata, Pg
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
@@ -32,7 +32,7 @@ use crate::{
 
 pub struct AsyncPgConnection {
     conn: tokio_postgres::Client,
-    stmt_cache: StmtCache<diesel::pg::Pg, Statement>,
+    stmt_cache: StmtCache<Pg, Statement>,
     transaction_state: AnsiTransactionManager,
     metadata_cache: PgMetadataCache,
     next_lookup: Vec<(Option<String>, String)>,
@@ -45,7 +45,7 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-impl<'a> AsyncConnectionGatWorkaround<'a, diesel::pg::Pg> for AsyncPgConnection {
+impl<'a> AsyncConnectionGatWorkaround<'a, Pg> for AsyncPgConnection {
     type Stream = Pin<Box<dyn Stream<Item = QueryResult<PgRow>> + Send + 'a>>;
 
     type Row = PgRow;
@@ -53,7 +53,7 @@ impl<'a> AsyncConnectionGatWorkaround<'a, diesel::pg::Pg> for AsyncPgConnection 
 
 #[async_trait::async_trait]
 impl AsyncConnection for AsyncPgConnection {
-    type Backend = diesel::pg::Pg;
+    type Backend = Pg;
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
@@ -227,14 +227,14 @@ impl AsyncPgConnection {
         ) -> F,
     ) -> QueryResult<R>
     where
-        T: QueryFragment<diesel::pg::Pg> + QueryId + Send,
+        T: QueryFragment<Pg> + QueryId + Send,
         F: Future<Output = QueryResult<R>>,
     {
         let mut bind_collector;
         loop {
             // we need a new bind collector per iteration here
-            bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
-            let res = query.collect_binds(&mut bind_collector, self);
+            bind_collector = RawBytesBindCollector::<Pg>::new();
+            let res = query.collect_binds(&mut bind_collector, self, &Pg);
 
             if !self.next_lookup.is_empty() {
                 for (schema, lookup_type_name) in
@@ -274,7 +274,7 @@ impl AsyncPgConnection {
 
         let stmt = {
             let stmt = stmt_cache
-                .cached_prepared_statement(query, &bind_collector.metadata, conn)
+                .cached_prepared_statement(query, &bind_collector.metadata, conn, &Pg)
                 .await?;
             stmt
         };

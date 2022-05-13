@@ -1,4 +1,4 @@
-use diesel::mysql::types::MysqlTime;
+use diesel::mysql::data_types::MysqlTime;
 use diesel::mysql::MysqlType;
 use diesel::mysql::MysqlValue;
 use mysql_async::{Params, Value};

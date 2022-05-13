@@ -4,7 +4,7 @@ use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{
     AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
 };
-use diesel::connection::MaybeCached;
+use diesel::connection::statement_cache::MaybeCached;
 use diesel::mysql::{Mysql, MysqlType};
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
@@ -132,7 +132,7 @@ impl PrepareCallback<Statement, MysqlType> for mysql_async::Conn {
         &mut self,
         sql: &str,
         _metadata: &[MysqlType],
-        _is_for_cache: diesel::connection::PrepareForCache,
+        _is_for_cache: diesel::connection::statement_cache::PrepareForCache,
     ) -> QueryResult<Statement> {
         Ok(self.prep(sql).await.map_err(ErrorHelper)?)
     }
@@ -173,7 +173,7 @@ impl AsyncMysqlConnection {
         F: Future<Output = QueryResult<R>>,
     {
         let mut bind_collector = RawBytesBindCollector::<Mysql>::new();
-        query.collect_binds(&mut bind_collector, &mut ())?;
+        query.collect_binds(&mut bind_collector, &mut (), &Mysql)?;
 
         let binds = bind_collector.binds;
         let metadata = bind_collector.metadata;
@@ -189,7 +189,7 @@ impl AsyncMysqlConnection {
 
         let stmt = {
             let stmt = stmt_cache
-                .cached_prepared_statement(query, &metadata, conn)
+                .cached_prepared_statement(query, &metadata, conn, &Mysql)
                 .await?;
             stmt
         };
@@ -200,6 +200,9 @@ impl AsyncMysqlConnection {
                 last_stmt.as_ref().unwrap()
             }
             MaybeCached::Cached(s) => s,
+            _ => {
+                todo!()
+            }
         };
 
         callback(&mut self.conn, stmt, ToSqlHelper { metadata, binds }).await

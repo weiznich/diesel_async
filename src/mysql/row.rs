@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use diesel::mysql::types::{MysqlTime, MysqlTimestampType};
+use diesel::mysql::data_types::{MysqlTime, MysqlTimestampType};
 use diesel::mysql::{Mysql, MysqlType, MysqlValue};
 use diesel::row::{PartialRow, RowGatWorkaround, RowIndex};
 use mysql_async::consts::{ColumnFlags, ColumnType};

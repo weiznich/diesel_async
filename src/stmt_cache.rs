@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use diesel::backend::Backend;
-use diesel::connection::{MaybeCached, PrepareForCache, StatementCacheKey};
+use diesel::connection::statement_cache::{MaybeCached, PrepareForCache, StatementCacheKey};
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::QueryResult;
 
@@ -32,6 +32,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
         query: T,
         metadata: &[DB::TypeMetadata],
         prepare_fn: &mut F,
+        db: &DB,
     ) -> QueryResult<MaybeCached<'_, S>>
     where
         DB::QueryBuilder: Default,
@@ -42,10 +43,10 @@ impl<S, DB: Backend> StmtCache<DB, S> {
     {
         use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-        let cache_key = StatementCacheKey::for_source(&query, &metadata)?;
+        let cache_key = StatementCacheKey::for_source(&query, &metadata, db)?;
 
-        if !query.is_safe_to_cache_prepared()? {
-            let sql = cache_key.sql(&query)?;
+        if !query.is_safe_to_cache_prepared(db)? {
+            let sql = cache_key.sql(&query, db)?;
 
             let stmt = prepare_fn
                 .prepare(&*sql, metadata, PrepareForCache::No)
@@ -57,7 +58,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
             Occupied(entry) => entry.into_mut(),
             Vacant(entry) => {
                 let statement = {
-                    let sql = entry.key().sql(&query)?;
+                    let sql = entry.key().sql(&query, db)?;
                     prepare_fn
                         .prepare(&*sql, metadata, PrepareForCache::Yes)
                         .await?
