@@ -1,6 +1,7 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
+use futures::FutureExt;
 use std::fmt::Debug;
 use std::pin::Pin;
 
@@ -19,12 +20,32 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                 let user: Option<User> = users::table.find(42).first(conn).await.optional()?;
                 assert_eq!(user, None::<User>);
 
+                let res = conn
+                    .transaction::<_, _, diesel::result::Error>(|conn| {
+                        async move {
+                            diesel::insert_into(users::table)
+                                .values(users::name.eq("Dave"))
+                                .execute(conn)
+                                .await?;
+                            let count = users::table.count().get_result::<i64>(conn).await?;
+                            assert_eq!(count, 3);
+                            Ok(())
+                        }
+                        .boxed()
+                    })
+                    .await;
+                assert!(res.is_ok());
+                let count = users::table.count().get_result::<i64>(conn).await?;
+                assert_eq!(count, 3);
+
                 let res = diesel::insert_into(users::table)
                     .values(users::name.eq("Eve"))
                     .execute(conn)
                     .await?;
 
                 assert_eq!(res, 1, "Insert in transaction returned wrong result");
+                let count = users::table.count().get_result::<i64>(conn).await?;
+                assert_eq!(count, 4);
 
                 Err(diesel::result::Error::RollbackTransaction)
             }) as Pin<Box<_>>
@@ -106,7 +127,16 @@ async fn setup(connection: &mut TestConnection) {
 async fn connection() -> TestConnection {
     let db_url = std::env::var("DATABASE_URL").unwrap();
     let mut conn = TestConnection::establish(&db_url).await.unwrap();
-    conn.begin_test_transaction().await.unwrap();
+    if cfg!(feature = "postgres") {
+        // postgres allows to modify the schema inside of a transaction
+        conn.begin_test_transaction().await.unwrap();
+    }
     setup(&mut conn).await;
+    if cfg!(feature = "mysql") {
+        // mysql does not allow this and does even automatically close
+        // any open transaction. As of this we open a transaction **after**
+        // we setup the schema
+        conn.begin_test_transaction().await.unwrap();
+    }
     conn
 }
