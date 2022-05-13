@@ -1,0 +1,161 @@
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+name: CI Tests
+
+# See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
+# This will ensure that only one commit will be running tests at a time on each PR.
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  check_and_test:
+    name: Check
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: ["stable", "beta", "nightly"]
+        backend: ["postgres", "mysql"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Cache cargo registry
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ matrix.backend }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Set environment variables
+        shell: bash
+        if: matrix.backend == 'mysql'
+        run: |
+          echo "RUST_TEST_THREADS=1" >> $GITHUB_ENV
+
+      - name: Set environment variables
+        shell: bash
+        if: matrix.rust == 'nightly'
+        run: |
+          echo "RUSTFLAGS=--cap-lints=warn" >> $GITHUB_ENV
+
+      - name: Install postgres (Linux)
+        if: runner.os == 'Linux' && matrix.backend == 'postgres'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql
+          echo "host    all             all             127.0.0.1/32            md5" > sudo tee -a /etc/postgresql/10/main/pg_hba.conf
+          sudo service postgresql restart && sleep 3
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo service postgresql restart && sleep 3
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost/" >> $GITHUB_ENV
+
+      - name: Install mysql (Linux)
+        if: runner.os == 'Linux' && matrix.backend == 'mysql'
+        run: |
+          sudo systemctl start mysql.service
+          mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'root'@'localhost';" -uroot -proot
+          echo "DATABASE_URL=mysql://root:root@localhost/diesel_test" >> $GITHUB_ENV
+
+      - name: Install postgres (MacOS)
+        if: runner.os == 'macOS' && matrix.backend == 'postgres'
+        run: |
+          /usr/local/opt/postgres/bin/pg_ctl -D /usr/local/var/postgres start
+          sleep 3
+          /usr/local/opt/postgres/bin/createuser -s postgres
+          echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
+
+      - name: Install mysql (MacOS)
+        if: runner.os == 'macOS' && matrix.backend == 'mysql'
+        run: |
+          brew update
+          brew install mariadb@10.5
+          /usr/local/opt/mariadb@10.5/bin/mysql_install_db
+          /usr/local/opt/mariadb@10.5/bin/mysql.server start
+          sleep 3
+          /usr/local/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
+
+      - name: Install postgres (Windows)
+        if: runner.os == 'Windows' && matrix.backend == 'postgres'
+        shell: bash
+        run: |
+          choco install postgresql12 --force --params '/Password:root'
+          echo "C:\Program Files\PostgreSQL\12\bin" >> $GITHUB_PATH
+          echo "C:\Program Files\PostgreSQL\12\lib" >> $GITHUB_PATH
+          echo "DATABASE_URL=postgres://postgres:root@localhost/" >> $GITHUB_ENV
+
+      - name: Install mysql (Windows)
+        if: runner.os == 'Windows' && matrix.backend == 'mysql'
+        shell: cmd
+        run: |
+          choco install mysql
+          "C:\tools\mysql\current\bin\mysql" -e "create database diesel_test; create database diesel_unit_test; grant all on `diesel_%`.* to 'root'@'localhost';" -uroot
+
+      - name: Set variables for mysql (Windows)
+        if: runner.os == 'Windows' && matrix.backend == 'mysql'
+        shell: bash
+        run: |
+          echo "DATABASE_URL=mysql://root@localhost/diesel_test" >> $GITHUB_ENV
+
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - name: Rust version check
+        uses: actions-rs/cargo@v1
+        with:
+          command: version
+
+      - name: Test diesel_async
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }}"
+
+  rustfmt_and_clippy:
+    name: Check rustfmt style && run clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.54.0
+          profile: minimal
+          components: clippy, rustfmt
+          override: true
+      - name: Cache cargo registry
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: clippy-cargo-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: Remove potential newer clippy.toml from dependencies
+        run: |
+          cargo update
+          cargo fetch
+          find ~/.cargo/registry -iname "*clippy.toml" -delete
+
+      - name: Run clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --all
+
+      - name: Check formating
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check

@@ -9,8 +9,7 @@ license = "AGPL-v3"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-diesel = { version = "2.0.0-rc.0", default-features= false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"] }
-deadpool = { version = "0.9.4", optional = true, default-features = false, features = ["managed"] }
+diesel = { version = "2.0.0-rc.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
 async-trait = "0.1.51"
 futures = "0.3.17"
 tokio-postgres = { version = "0.7.2", optional = true}
@@ -22,7 +21,7 @@ mysql_common = {version = "0.28.0", optional = true}
 tokio = {version = "1.12.0", features = ["rt", "macros"]}
 cfg-if = "1"
 chrono = "0.4"
-diesel = { version = "2.0.0-rc.0", default-features= false, features=["chrono"] }
+diesel = { version = "2.0.0-rc.0", default-features = false,  features = ["chrono"]}
 
 [features]
 default = ["postgres", "mysql", "deadpool"]

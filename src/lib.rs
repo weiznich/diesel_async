@@ -45,8 +45,6 @@ where
 
     async fn establish(database_url: &str) -> ConnectionResult<Self>;
 
-    async fn execute(&mut self, query: &str) -> QueryResult<usize>;
-
     async fn load<'a, T>(
         &'a mut self,
         source: T,

@@ -11,7 +11,7 @@ use diesel::result::{ConnectionError, ConnectionResult};
 use diesel::QueryResult;
 use futures::{Future, Stream, StreamExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
-use mysql_async::{Opts, OptsBuilder, Params, Statement};
+use mysql_async::{Opts, OptsBuilder, Statement};
 
 mod error_helper;
 mod row;
@@ -68,16 +68,6 @@ impl AsyncConnection for AsyncMysqlConnection {
         })
     }
 
-    async fn execute(&mut self, query: &str) -> diesel::QueryResult<usize> {
-        let stmt = self.conn.prep(query).await.map_err(ErrorHelper)?;
-        self.conn
-            .exec_drop(stmt, Params::Empty)
-            .await
-            .map_err(ErrorHelper)?;
-
-        Ok(self.conn.affected_rows() as usize)
-    }
-
     async fn load<'a, T>(
         &'a mut self,
         source: T,
@@ -88,13 +78,13 @@ impl AsyncConnection for AsyncMysqlConnection {
             + diesel::query_builder::QueryId
             + Send,
     {
-        self.with_preapared_statement(source.as_query(), |conn, stmt, binds| async move {
+        self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
             let res = conn.exec_iter(&*stmt, binds).await.map_err(ErrorHelper)?;
 
             let stream = res
                 .stream_and_drop::<MysqlRow>()
                 .await
-                .map_err(|e| ErrorHelper(e))?
+                .map_err(ErrorHelper)?
                 .ok_or_else(|| {
                     diesel::result::Error::DeserializationError(Box::new(
                         diesel::result::UnexpectedEndOfRow,
@@ -114,7 +104,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             + diesel::query_builder::QueryId
             + Send,
     {
-        self.with_preapared_statement(source, |conn, stmt, binds| async move {
+        self.with_prepared_statement(source, |conn, stmt, binds| async move {
             conn.exec_drop(&*stmt, binds).await.map_err(ErrorHelper)?;
             Ok(conn.affected_rows() as usize)
         })
@@ -140,6 +130,7 @@ impl PrepareCallback<Statement, MysqlType> for mysql_async::Conn {
 
 impl AsyncMysqlConnection {
     pub async fn try_from(conn: mysql_async::Conn) -> ConnectionResult<Self> {
+        use crate::run_query_dsl::RunQueryDsl;
         let mut conn = AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
@@ -155,7 +146,8 @@ impl AsyncMysqlConnection {
         ];
 
         for stmt in setup_statements {
-            conn.execute(stmt)
+            diesel::sql_query(stmt)
+                .execute(&mut conn)
                 .await
                 .map_err(ConnectionError::CouldntSetupConfiguration)?;
         }
@@ -163,7 +155,7 @@ impl AsyncMysqlConnection {
         Ok(conn)
     }
 
-    async fn with_preapared_statement<'a, T, F, R>(
+    async fn with_prepared_statement<'a, T, F, R>(
         &'a mut self,
         query: T,
         callback: impl FnOnce(&'a mut mysql_async::Conn, &'a Statement, ToSqlHelper) -> F,
@@ -200,9 +192,7 @@ impl AsyncMysqlConnection {
                 last_stmt.as_ref().unwrap()
             }
             MaybeCached::Cached(s) => s,
-            _ => {
-                todo!()
-            }
+            _ => unreachable!("We've opted into breaking diesel changes and want to know if things break because someone added a new variant here")
         };
 
         callback(&mut self.conn, stmt, ToSqlHelper { metadata, binds }).await

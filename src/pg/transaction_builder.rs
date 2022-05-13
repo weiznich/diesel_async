@@ -279,7 +279,7 @@ where
         E: From<diesel::result::Error>,
     {
         let mut query_builder = <Pg as Backend>::QueryBuilder::default();
-         self.to_sql(&mut query_builder, &Pg)?;
+        self.to_sql(&mut query_builder, &Pg)?;
         let sql = query_builder.finish();
 
         AnsiTransactionManager::begin_transaction_sql(&mut *self.connection, &sql).await?;

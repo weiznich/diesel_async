@@ -78,13 +78,6 @@ impl AsyncConnection for AsyncPgConnection {
         Ok(conn)
     }
 
-    async fn execute(&mut self, query: &str) -> QueryResult<usize> {
-        let res = tokio_postgres::Client::execute(&self.conn, query, &[])
-            .await
-            .map_err(ErrorHelper)?;
-        Ok(res as usize)
-    }
-
     async fn load<'a, T>(
         &'a mut self,
         source: T,
@@ -93,7 +86,7 @@ impl AsyncConnection for AsyncPgConnection {
         T: AsQuery + Send,
         T::Query: QueryFragment<Self::Backend> + QueryId + Send,
     {
-        self.with_preapared_statement(source.as_query(), |conn, stmt, binds| async move {
+        self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
             let res = conn.query_raw(&*stmt, binds).await.map_err(ErrorHelper)?;
 
             Ok(res
@@ -108,7 +101,7 @@ impl AsyncConnection for AsyncPgConnection {
     where
         T: QueryFragment<Self::Backend> + QueryId + Send,
     {
-        self.with_preapared_statement(source, |conn, stmt, binds| async move {
+        self.with_prepared_statement(source, |conn, stmt, binds| async move {
             let binds = binds
                 .iter()
                 .map(|b| b as &(dyn ToSql + Sync))
@@ -165,7 +158,7 @@ impl PrepareCallback<Statement, PgTypeMetadata> for tokio_postgres::Client {
     ) -> QueryResult<Statement> {
         let bind_types = metadata
             .iter()
-            .map(|t| type_from_oid(t))
+            .map(type_from_oid)
             .collect::<QueryResult<Vec<_>>>()?;
 
         Ok(self
@@ -212,12 +205,18 @@ impl AsyncPgConnection {
     }
 
     async fn set_config_options(&mut self) -> QueryResult<()> {
-        self.execute("SET TIME ZONE 'UTC'").await?;
-        self.execute("SET CLIENT_ENCODING TO 'UTF8'").await?;
+        use crate::run_query_dsl::RunQueryDsl;
+
+        diesel::sql_query("SET TIME ZONE 'UTC'")
+            .execute(self)
+            .await?;
+        diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'")
+            .execute(self)
+            .await?;
         Ok(())
     }
 
-    async fn with_preapared_statement<'a, T, F, R>(
+    async fn with_prepared_statement<'a, T, F, R>(
         &'a mut self,
         query: T,
         callback: impl FnOnce(
@@ -233,13 +232,11 @@ impl AsyncPgConnection {
         let mut bind_collector;
         loop {
             // we need a new bind collector per iteration here
-            bind_collector = RawBytesBindCollector::<Pg>::new();
-            let res = query.collect_binds(&mut bind_collector, self, &Pg);
+            bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
+            let res = query.collect_binds(&mut bind_collector, self, &diesel::pg::Pg);
 
             if !self.next_lookup.is_empty() {
-                for (schema, lookup_type_name) in
-                    std::mem::replace(&mut self.next_lookup, Vec::new())
-                {
+                for (schema, lookup_type_name) in std::mem::take(&mut self.next_lookup) {
                     // as this is an async call and we don't want to infect the whole diesel serialization
                     // api with async we just error out in the `PgMetadataLookup` implementation below if we encounter
                     // a type that is not cached yet
@@ -274,7 +271,7 @@ impl AsyncPgConnection {
 
         let stmt = {
             let stmt = stmt_cache
-                .cached_prepared_statement(query, &bind_collector.metadata, conn, &Pg)
+                .cached_prepared_statement(query, &bind_collector.metadata, conn, &diesel::pg::Pg)
                 .await?;
             stmt
         };

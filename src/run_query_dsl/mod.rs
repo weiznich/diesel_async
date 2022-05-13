@@ -110,11 +110,11 @@ where
 pub trait RunQueryDsl<Conn>: Sized {
     /// Executes the given command, returning the number of rows affected.
     ///
-    /// `execute` is usually used in conjunction with [`insert_into`](crate::insert_into()),
-    /// [`update`](crate::update()) and [`delete`](crate::delete()) where the number of
+    /// `execute` is usually used in conjunction with [`insert_into`](diesel::insert_into()),
+    /// [`update`](diesel::update()) and [`delete`](diesel::delete()) where the number of
     /// affected rows is often enough information.
     ///
-    /// When asking the database to return data from a query, [`load`](crate::query_dsl::RunQueryDsl::load()) should
+    /// When asking the database to return data from a query, [`load`](crate::run_query_dsl::RunQueryDsl::load()) should
     /// probably be used instead.
     ///
     /// # Example
@@ -164,10 +164,10 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// For insert, update, and delete operations where only a count of affected is needed,
     /// [`execute`] should be used instead.
     ///
-    /// [`Queryable`]: crate::deserialize::Queryable
-    /// [`QueryableByName`]: crate::deserialize::QueryableByName
-    /// [`execute`]: crate::query_dsl::RunQueryDsl::execute()
-    /// [`sql_query`]: crate::sql_query()
+    /// [`Queryable`]: diesel::deserialize::Queryable
+    /// [`QueryableByName`]: diesel::deserialize::QueryableByName
+    /// [`execute`]: crate::run_query_dsl::RunQueryDsl::execute()
+    /// [`sql_query`]: diesel::sql_query()
     ///
     /// # Examples
     ///
@@ -281,10 +281,10 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// For insert, update, and delete operations where only a count of affected is needed,
     /// [`execute`] should be used instead.
     ///
-    /// [`Queryable`]: crate::deserialize::Queryable
-    /// [`QueryableByName`]: crate::deserialize::QueryableByName
-    /// [`execute`]: crate::query_dsl::RunQueryDsl::execute()
-    /// [`sql_query`]: crate::sql_query()
+    /// [`Queryable`]: diesel::deserialize::Queryable
+    /// [`QueryableByName`]: diesel::deserialize::QueryableByName
+    /// [`execute`]: crate::run_query_dsl::RunQueryDsl::execute()
+    /// [`sql_query`]: diesel::sql_query()
     ///
     /// # Examples
     ///
@@ -463,7 +463,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// This method is an alias for [`load`], but with a name that makes more
     /// sense for insert, update, and delete statements.
     ///
-    /// [`load`]: crate::query_dsl::RunQueryDsl::load()
+    /// [`load`]: crate::run_query_dsl::RunQueryDsl::load()
     async fn get_results<U>(self, conn: &mut Conn) -> QueryResult<Vec<U>>
     where
         U: Send,
