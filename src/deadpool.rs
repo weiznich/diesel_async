@@ -9,7 +9,7 @@ use diesel::{
 };
 
 use crate::{
-    AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection, TransactionManager,
+    AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection, TransactionManager, RunQueryDsl,
 };
 
 pub use deadpool::managed::reexports::*;
@@ -67,7 +67,7 @@ pub trait ManagedAsyncConnection: AsyncConnection {
 impl ManagedAsyncConnection for crate::pg::AsyncPgConnection {
     async fn recycle(&mut self) -> QueryResult<()> {
         // TODO: ping with query can be expensive for some use cases
-        self.execute("SELECT 1").await.map(|_| ())
+        diesel::sql_query("SELECT 1").execute(self).await.map(|_| ())
     }
 }
 
@@ -76,7 +76,7 @@ impl ManagedAsyncConnection for crate::pg::AsyncPgConnection {
 impl ManagedAsyncConnection for crate::mysql::AsyncMysqlConnection {
     async fn recycle(&mut self) -> QueryResult<()> {
         // TODO: ping with query can be expensive for some use cases
-        self.execute("SELECT 1").await.map(|_| ())
+        diesel::sql_query("SELECT 1").execute(self).await.map(|_| ())
     }
 }
 
@@ -145,10 +145,6 @@ where
         )))
     }
 
-    async fn execute(&mut self, query: &str) -> QueryResult<usize> {
-        (&mut **self).execute(query).await
-    }
-
     async fn load<'a, S>(
         &'a mut self,
         source: S,
@@ -157,7 +153,7 @@ where
         S: AsQuery + Send,
         S::Query: QueryFragment<Self::Backend> + QueryId + Send,
     {
-        (&mut **self).load(source).await
+        todo!()
     }
 
     async fn execute_returning_count<S>(&mut self, source: S) -> QueryResult<usize>
