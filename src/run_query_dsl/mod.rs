@@ -2,18 +2,10 @@ use std::pin::Pin;
 
 use crate::AsyncConnection;
 use diesel::associations::HasTable;
-use diesel::backend::Backend;
-use diesel::deserialize::FromSqlRow;
-#[cfg(any(feature = "mysql", feature = "postgres"))]
-use diesel::expression::{is_aggregate, MixedAggregates, ValidGrouping};
 use diesel::query_builder::IntoUpdateTarget;
-#[cfg(any(feature = "mysql", feature = "postgres"))]
-use diesel::query_source::QuerySource;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
-#[cfg(any(feature = "mysql", feature = "postgres"))]
-use diesel::{dsl, Table};
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 
 pub mod methods {
     use super::*;
@@ -23,90 +15,180 @@ pub mod methods {
     use diesel::expression::QueryMetadata;
     use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
     use diesel::query_dsl::CompatibleType;
-    use futures::{Stream, StreamExt};
+    use futures::{Future, Stream, TryFutureExt};
 
-    #[async_trait::async_trait]
     pub trait ExecuteDsl<Conn, DB = <Conn as AsyncConnection>::Backend>
     where
         Conn: AsyncConnection<Backend = DB>,
         DB: Backend,
     {
-        async fn execute(query: Self, conn: &mut Conn) -> QueryResult<usize>;
+        fn execute<'conn, 'query>(
+            query: Self,
+            conn: &'conn mut Conn,
+        ) -> <Conn as AsyncConnectionGatWorkaround<'conn, 'query, Conn::Backend>>::ExecuteFuture
+        where
+            Self: 'query;
     }
 
-    #[async_trait::async_trait]
     impl<Conn, DB, T> ExecuteDsl<Conn, DB> for T
     where
         Conn: AsyncConnection<Backend = DB>,
         DB: Backend,
         T: QueryFragment<DB> + QueryId + Send,
     {
-        async fn execute(query: Self, conn: &mut Conn) -> QueryResult<usize> {
-            conn.execute_returning_count(query).await
+        fn execute<'conn, 'query>(
+            query: Self,
+            conn: &'conn mut Conn,
+        ) -> <Conn as AsyncConnectionGatWorkaround<'conn, 'query, Conn::Backend>>::ExecuteFuture
+        where
+            Self: 'query,
+        {
+            conn.execute_returning_count(query)
         }
     }
 
-    pub trait LoadQueryGatWorkaround<'a, Conn, U> {
-        type Stream: Stream<Item = QueryResult<U>> + Send + 'a;
+    pub trait LoadQueryGatWorkaround<'conn, 'query, Conn, U> {
+        type LoadFuture: Future<Output = QueryResult<Self::Stream>> + Send;
+        type Stream: Stream<Item = QueryResult<U>> + Send;
     }
 
-    #[async_trait::async_trait]
-    pub trait LoadQuery<Conn: AsyncConnection, U>
+    pub trait LoadQuery<'query, Conn: AsyncConnection, U>
     where
-        for<'a> Self: LoadQueryGatWorkaround<'a, Conn, U>,
+        for<'a> Self: LoadQueryGatWorkaround<'a, 'query, Conn, U>,
     {
-        async fn internal_load<'a>(
+        fn internal_load<'conn>(
             self,
-            conn: &'a mut Conn,
-        ) -> QueryResult<<Self as LoadQueryGatWorkaround<'a, Conn, U>>::Stream>;
+            conn: &'conn mut Conn,
+        ) -> <Self as LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture;
     }
 
-    impl<'a, Conn, U, T, DB, ST> LoadQueryGatWorkaround<'a, Conn, U> for T
+    impl<'conn, 'query, Conn, U, T, DB, ST> LoadQueryGatWorkaround<'conn, 'query, Conn, U> for T
     where
         Conn: AsyncConnection<Backend = DB>,
+        U: Send,
         T: AsQuery + Send,
-        T::Query: QueryFragment<DB> + QueryId + Send,
         T::SqlType: CompatibleType<U, DB, SqlType = ST>,
         U: FromSqlRow<ST, DB> + Send + 'static,
         DB: QueryMetadata<T::SqlType>,
     {
+        type LoadFuture = futures::future::MapOk<
+            <Conn as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::LoadFuture,
+            fn(<Conn as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::Stream) -> Self::Stream,
+        >;
         type Stream = futures::stream::Map<
-            <Conn as AsyncConnectionGatWorkaround<'a, DB>>::Stream,
-            fn(QueryResult<<Conn as AsyncConnectionGatWorkaround<'a, DB>>::Row>) -> QueryResult<U>,
+            <Conn as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::Stream,
+            fn(
+                QueryResult<<Conn as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::Row>,
+            ) -> QueryResult<U>,
         >;
     }
 
-    #[async_trait::async_trait]
-    impl<Conn, DB, T, U, ST> LoadQuery<Conn, U> for T
+    impl<'query, Conn, DB, T, U, ST> LoadQuery<'query, Conn, U> for T
     where
         Conn: AsyncConnection<Backend = DB>,
+        U: Send,
         DB: Backend + 'static,
-        T: AsQuery + Send,
-        T::Query: QueryFragment<DB> + QueryId + Send,
+        T: AsQuery + Send + 'query,
+        T::Query: QueryFragment<DB> + QueryId + Send + 'query,
         T::SqlType: CompatibleType<U, DB, SqlType = ST>,
         U: FromSqlRow<ST, DB> + Send + 'static,
         DB: QueryMetadata<T::SqlType>,
         ST: 'static,
     {
-        async fn internal_load<'a>(
+        fn internal_load<'conn>(
             self,
-            conn: &'a mut Conn,
-        ) -> QueryResult<<Self as LoadQueryGatWorkaround<'a, Conn, U>>::Stream> {
-            Ok(conn.load(self).await?.map(map_row_helper::<_, DB, U, ST>))
+            conn: &'conn mut Conn,
+        ) -> <Self as LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture {
+            // this cast is required to make rustc happy
+            // it seems to get otherwise confused about the type of
+            // this function pointer
+            let f = map_result_stream_future::<U, _, _, DB, ST> as _;
+            conn.load(self).map_ok(f)
         }
+    }
+
+    fn map_result_stream_future<'s, 'a, U, S, R, DB, ST>(
+        stream: S,
+    ) -> futures::stream::Map<S, fn(QueryResult<R>) -> QueryResult<U>>
+    where
+        S: Stream<Item = QueryResult<R>> + Send + 's,
+        R: diesel::row::Row<'a, DB> + 's,
+        DB: Backend + 'static,
+        U: FromSqlRow<ST, DB> + 'static,
+        ST: 'static,
+    {
+        stream.map(map_row_helper::<_, DB, U, ST>)
+    }
+
+    fn map_row_helper<'a, R, DB, U, ST>(row: QueryResult<R>) -> QueryResult<U>
+    where
+        U: FromSqlRow<ST, DB>,
+        R: diesel::row::Row<'a, DB>,
+        DB: Backend,
+    {
+        U::build_from_row(&row?).map_err(diesel::result::Error::DeserializationError)
     }
 }
 
-fn map_row_helper<'a, R, DB, U, ST>(row: QueryResult<R>) -> QueryResult<U>
-where
-    U: FromSqlRow<ST, DB>,
-    R: diesel::row::Row<'a, DB>,
-    DB: Backend,
-{
-    U::build_from_row(&row?).map_err(diesel::result::Error::DeserializationError)
+pub mod return_futures {
+    use super::methods;
+    use crate::{AsyncConnection, AsyncConnectionGatWorkaround};
+    use diesel::QueryResult;
+    use std::pin::Pin;
+
+    pub type LoadFuture<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
+        <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture,
+        futures::stream::TryCollect<
+            <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream,
+            Vec<U>,
+        >,
+        fn(
+            <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream,
+        ) -> futures::stream::TryCollect<
+            <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream,
+            Vec<U>,
+        >,
+    >;
+
+    pub type GetResult<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
+        <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture,
+        futures::future::Map<
+            futures::stream::StreamFuture<
+                Pin<Box<<Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream>>,
+            >,
+            fn(
+                (
+                    Option<QueryResult<U>>,
+                    Pin<
+                        Box<<Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream>,
+                    >,
+                ),
+            ) -> QueryResult<U>,
+        >,
+        fn(
+            <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream,
+        ) -> futures::future::Map<
+            futures::stream::StreamFuture<
+                Pin<Box<<Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream>>,
+            >,
+            fn(
+                (
+                    Option<QueryResult<U>>,
+                    Pin<
+                        Box<<Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::Stream>,
+                    >,
+                ),
+            ) -> QueryResult<U>,
+        >,
+    >;
+
+    pub type Execute<'conn, 'query, Conn> = <Conn as AsyncConnectionGatWorkaround<
+        'conn,
+        'query,
+        <Conn as AsyncConnection>::Backend,
+    >>::ExecuteFuture;
 }
 
-#[async_trait::async_trait]
 pub trait RunQueryDsl<Conn>: Sized {
     /// Executes the given command, returning the number of rows affected.
     ///
@@ -145,12 +227,15 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// #     Ok(())
     /// # }
     /// ```
-    async fn execute(self, conn: &mut Conn) -> QueryResult<usize>
+    fn execute<'conn, 'query>(
+        self,
+        conn: &'conn mut Conn,
+    ) -> return_futures::Execute<'conn, 'query, Conn>
     where
         Conn: AsyncConnection + Send,
-        Self: methods::ExecuteDsl<Conn>,
+        Self: methods::ExecuteDsl<Conn> + 'query,
     {
-        methods::ExecuteDsl::execute(self, conn).await
+        methods::ExecuteDsl::execute(self, conn)
     }
 
     /// Executes the given query, returning a [`Vec`] with the returned rows.
@@ -250,20 +335,30 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// #     Ok(())
     /// # }
     /// ```
-    async fn load<U>(self, conn: &mut Conn) -> QueryResult<Vec<U>>
+    fn load<'query, 'conn, U>(
+        self,
+        conn: &'conn mut Conn,
+    ) -> return_futures::LoadFuture<'conn, 'query, Self, Conn, U>
     where
         U: Send,
         Conn: AsyncConnection,
-        Self: methods::LoadQuery<Conn, U>,
+        Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        let stream = self.internal_load(conn).await?;
+        fn collect_result<U, S>(stream: S) -> futures::stream::TryCollect<S, Vec<U>>
+        where
+            S: Stream<Item = QueryResult<U>>,
+        {
+            stream.try_collect()
+        }
+        let load_future = self.internal_load(conn);
 
-        stream
-            .try_fold(Vec::new(), |mut acc, item| {
-                acc.push(item);
-                futures::future::ready(Ok(acc))
-            })
-            .await
+        // this cast is required to make rustc happy
+        // it seems to get otherwise confused about the type of
+        // this function pointer
+
+        let f = collect_result::<U, _> as _;
+        let r = load_future.and_then(f);
+        r
     }
 
     /// Executes the given query, returning a [`Stream`] with the returned rows.
@@ -385,16 +480,16 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// #     Ok(())
     /// # }
     /// ```
-    async fn load_stream<'a, U>(
+    fn load_stream<'conn, 'query, U>(
         self,
-        conn: &'a mut Conn,
-    ) -> QueryResult<Pin<Box<dyn Stream<Item = QueryResult<U>> + Send + 'a>>>
+        conn: &'conn mut Conn,
+    ) -> <Self as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture
     where
         Conn: AsyncConnection,
-        U: 'a,
-        Self: methods::LoadQuery<Conn, U> + 'a,
+        U: 'conn,
+        Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        self.internal_load(conn).await.map(|s| s.boxed())
+        self.internal_load(conn)
     }
 
     /// Runs the command, and returns the affected row.
@@ -445,17 +540,40 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// #     Ok(())
     /// # }
     /// ```
-    async fn get_result<U>(self, conn: &mut Conn) -> QueryResult<U>
+    fn get_result<'query, 'conn, U>(
+        self,
+        conn: &'conn mut Conn,
+    ) -> return_futures::GetResult<'conn, 'query, Self, Conn, U>
     where
-        U: Send,
+        U: Send + 'conn,
         Conn: AsyncConnection,
-        Self: methods::LoadQuery<Conn, U>,
+        Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        let res = self.load(conn).await?;
-        match res.into_iter().next() {
-            Some(v) => Ok(v),
-            None => Err(diesel::result::Error::NotFound),
+        fn get_next_stream_element<S, U>(
+            stream: S,
+        ) -> futures::future::Map<
+            futures::stream::StreamFuture<Pin<Box<S>>>,
+            fn((Option<QueryResult<U>>, Pin<Box<S>>)) -> QueryResult<U>,
+        >
+        where
+            S: Stream<Item = QueryResult<U>>,
+        {
+            fn map_option_to_result<U, S>(
+                (o, _): (Option<QueryResult<U>>, Pin<Box<S>>),
+            ) -> QueryResult<U> {
+                match o {
+                    Some(s) => s,
+                    None => Err(diesel::result::Error::NotFound),
+                }
+            }
+
+            let stream = Box::pin(stream);
+            let f = map_option_to_result as _;
+            let s = stream.into_future().map(f);
+            s
         }
+        let f = get_next_stream_element as _;
+        self.load_stream(conn).and_then(f)
     }
 
     /// Runs the command, returning an `Vec` with the affected rows.
@@ -464,13 +582,16 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// sense for insert, update, and delete statements.
     ///
     /// [`load`]: crate::run_query_dsl::RunQueryDsl::load()
-    async fn get_results<U>(self, conn: &mut Conn) -> QueryResult<Vec<U>>
+    fn get_results<'query, 'conn, U>(
+        self,
+        conn: &'conn mut Conn,
+    ) -> return_futures::LoadFuture<'conn, 'query, Self, Conn, U>
     where
         U: Send,
         Conn: AsyncConnection,
-        Self: methods::LoadQuery<Conn, U>,
+        Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        self.load(conn).await
+        self.load(conn)
     }
 
     /// Attempts to load a single record.
@@ -513,16 +634,17 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// #     Ok(())
     /// # }
     /// ```
-    async fn first<U>(self, conn: &mut Conn) -> QueryResult<U>
+    fn first<'query, 'conn, U>(
+        self,
+        conn: &'conn mut Conn,
+    ) -> return_futures::GetResult<'conn, 'query, diesel::dsl::Limit<Self>, Conn, U>
     where
-        U: Send,
+        U: Send + 'conn,
         Conn: AsyncConnection,
         Self: diesel::query_dsl::methods::LimitDsl,
-        diesel::dsl::Limit<Self>: methods::LoadQuery<Conn, U> + Send,
+        diesel::dsl::Limit<Self>: methods::LoadQuery<'query, Conn, U> + Send + 'query,
     {
-        diesel::query_dsl::methods::LimitDsl::limit(self, 1)
-            .get_result(conn)
-            .await
+        diesel::query_dsl::methods::LimitDsl::limit(self, 1).get_result(conn)
     }
 }
 
@@ -554,7 +676,7 @@ pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnection {
 
 #[cfg(feature = "mysql")]
 #[async_trait::async_trait]
-impl<Changes, Output> UpdateAndFetchResults<Changes, Output> for crate::AsyncMysqlConnection
+impl<'b, Changes, Output> UpdateAndFetchResults<Changes, Output> for crate::AsyncMysqlConnection
 where
     Output: Send,
     Changes: Copy + diesel::Identifiable + Send,
@@ -563,13 +685,15 @@ where
     Changes::WhereClause: Send,
     Changes::Changeset: Send,
     Changes::Id: Send,
-    dsl::Update<Changes, Changes>: methods::ExecuteDsl<crate::AsyncMysqlConnection>,
-    dsl::Find<Changes::Table, Changes::Id>:
-        methods::LoadQuery<crate::AsyncMysqlConnection, Output> + Send,
-    <Changes::Table as Table>::AllColumns: ValidGrouping<()>,
-    <<Changes::Table as Table>::AllColumns as ValidGrouping<()>>::IsAggregate:
-        MixedAggregates<is_aggregate::No, Output = is_aggregate::No>,
-    <Changes::Table as QuerySource>::FromClause: Send,
+    diesel::dsl::Update<Changes, Changes>: methods::ExecuteDsl<crate::AsyncMysqlConnection>,
+    diesel::dsl::Find<Changes::Table, Changes::Id>:
+        methods::LoadQuery<'b, crate::AsyncMysqlConnection, Output> + Send + 'b,
+    <Changes::Table as diesel::Table>::AllColumns: diesel::expression::ValidGrouping<()>,
+    <<Changes::Table as diesel::Table>::AllColumns as diesel::expression::ValidGrouping<()>>::IsAggregate: diesel::expression::MixedAggregates<
+        diesel::expression::is_aggregate::No,
+        Output = diesel::expression::is_aggregate::No,
+    >,
+    <Changes::Table as diesel::query_source::QuerySource>::FromClause: Send,
 {
     async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
     where
@@ -587,18 +711,18 @@ where
 
 #[cfg(feature = "postgres")]
 #[async_trait::async_trait]
-impl<Changes, Output> UpdateAndFetchResults<Changes, Output> for crate::AsyncPgConnection
+impl<'b, Changes, Output> UpdateAndFetchResults<Changes, Output> for crate::AsyncPgConnection
 where
     Output: Send,
     Changes: Copy + AsChangeset<Target = <Changes as HasTable>::Table> + IntoUpdateTarget + Send,
-    dsl::Update<Changes, Changes>: methods::LoadQuery<crate::AsyncPgConnection, Output>,
-    Changes::Table: Send,
-    Changes::WhereClause: Send,
-    Changes::Changeset: Send,
-    <Changes::Table as Table>::AllColumns: ValidGrouping<()>,
-    <<Changes::Table as Table>::AllColumns as ValidGrouping<()>>::IsAggregate:
-        MixedAggregates<is_aggregate::No, Output = is_aggregate::No>,
-    <Changes::Table as QuerySource>::FromClause: Send,
+    diesel::dsl::Update<Changes, Changes>: methods::LoadQuery<'b, crate::AsyncPgConnection, Output>,
+    Changes::Table: Send + 'b,
+    Changes::WhereClause: Send + 'b,
+    Changes::Changeset: Send + 'b,
+    <Changes::Table as diesel::Table>::AllColumns: diesel::expression::ValidGrouping<()>,
+    <<Changes::Table as diesel::Table>::AllColumns as diesel::expression::ValidGrouping<()>>::IsAggregate:
+        diesel::expression::MixedAggregates<diesel::expression::is_aggregate::No, Output = diesel::expression::is_aggregate::No>,
+    <Changes::Table as diesel::query_source::QuerySource>::FromClause: Send,
 {
     async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
     where

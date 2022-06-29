@@ -3,7 +3,7 @@ use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures::future::BoxFuture;
-use futures::Stream;
+use futures::{Future, Stream};
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -25,32 +25,37 @@ pub trait SimpleAsyncConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()>;
 }
 
-pub trait AsyncConnectionGatWorkaround<'a, DB: Backend> {
-    type Stream: Stream<Item = QueryResult<Self::Row>> + Send + 'a;
-    type Row: Row<'a, DB> + 'a;
+pub trait AsyncConnectionGatWorkaround<'conn, 'query, DB: Backend> {
+    type ExecuteFuture: Future<Output = QueryResult<usize>> + Send;
+    type LoadFuture: Future<Output = QueryResult<Self::Stream>> + Send;
+    type Stream: Stream<Item = QueryResult<Self::Row>> + Send;
+    type Row: Row<'conn, DB>;
 }
 
 #[async_trait::async_trait]
 pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send
 where
-    for<'a> Self: AsyncConnectionGatWorkaround<'a, Self::Backend>,
+    for<'a, 'b> Self: AsyncConnectionGatWorkaround<'a, 'b, Self::Backend>,
 {
     type Backend: Backend;
     type TransactionManager: TransactionManager<Self>;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self>;
 
-    async fn load<'a, T>(
-        &'a mut self,
+    fn load<'conn, 'query, T>(
+        &'conn mut self,
         source: T,
-    ) -> QueryResult<<Self as AsyncConnectionGatWorkaround<'a, Self::Backend>>::Stream>
+    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
     where
-        T: AsQuery + Send,
-        T::Query: QueryFragment<Self::Backend> + QueryId + Send;
+        T: AsQuery + Send + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query;
 
-    async fn execute_returning_count<T>(&mut self, source: T) -> QueryResult<usize>
+    fn execute_returning_count<'conn, 'query, T>(
+        &'conn mut self,
+        source: T,
+    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
     where
-        T: QueryFragment<Self::Backend> + QueryId + Send;
+        T: QueryFragment<Self::Backend> + QueryId + Send + 'query;
 
     async fn transaction<F, R, E>(&mut self, callback: F) -> Result<R, E>
     where

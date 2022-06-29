@@ -61,6 +61,9 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
         let buffer = match dbg!(value) {
             Value::NULL => None,
             Value::Bytes(b) => {
+                dbg!(&b);
+                dbg!(b.len());
+                dbg!(std::mem::size_of::<diesel::mysql::data_types::MysqlTime>());
                 // deserialize gets the length prepended, so we just use that buffer
                 // directly
                 Some(Cow::Borrowed(b as &[_]))
