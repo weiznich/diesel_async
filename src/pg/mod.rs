@@ -1,41 +1,101 @@
-use diesel::connection::statement_cache::{MaybeCached, PrepareForCache};
+use self::error_helper::ErrorHelper;
+use self::row::PgRow;
+use self::serialize::ToSqlHelper;
+use crate::stmt_cache::{PrepareCallback, StmtCache};
+use crate::{
+    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
+    TransactionManager,
+};
+use diesel::connection::statement_cache::PrepareForCache;
 use diesel::pg::{
     FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata,
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
-use futures::stream::TryStreamExt;
-use futures::{Future, Stream, StreamExt};
+use futures::future::BoxFuture;
+use futures::lock::Mutex;
+use futures::stream::{BoxStream, TryStreamExt};
+use futures::{Future, FutureExt, StreamExt};
 use std::borrow::Cow;
-use std::pin::Pin;
+use std::sync::Arc;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::types::Type;
 use tokio_postgres::Statement;
+
+pub use self::transaction_builder::TransactionBuilder;
 
 mod error_helper;
 mod row;
 mod serialize;
 mod transaction_builder;
 
-use self::error_helper::ErrorHelper;
-use self::row::PgRow;
-use self::serialize::ToSqlHelper;
-
-pub use self::transaction_builder::TransactionBuilder;
-
-use crate::stmt_cache::{PrepareCallback, StmtCache};
-use crate::{
-    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
-    TransactionManager,
-};
-
+/// A connection to a PostgreSQL database.
+///
+/// Connection URLs should be in the form
+/// `postgres://[user[:password]@]host/database_name`
+///
+/// Checkout the documentation of the [tokio_postgres]
+/// crate for details about the format
+///
+/// [tokio_postgres]: https://docs.rs/tokio-postgres/0.7.6/tokio_postgres/config/struct.Config.html#url
+///
+/// This connection supports *pipelined* requests. Pipelining can improve performance in use cases in which multiple,
+/// independent queries need to be executed. In a traditional workflow, each query is sent to the server after the
+/// previous query completes. In contrast, pipelining allows the client to send all of the queries to the server up
+/// front, minimizing time spent by one side waiting for the other to finish sending data:
+///
+/// ```not_rust
+///             Sequential                              Pipelined
+/// | Client         | Server          |    | Client         | Server          |
+/// |----------------|-----------------|    |----------------|-----------------|
+/// | send query 1   |                 |    | send query 1   |                 |
+/// |                | process query 1 |    | send query 2   | process query 1 |
+/// | receive rows 1 |                 |    | send query 3   | process query 2 |
+/// | send query 2   |                 |    | receive rows 1 | process query 3 |
+/// |                | process query 2 |    | receive rows 2 |                 |
+/// | receive rows 2 |                 |    | receive rows 3 |                 |
+/// | send query 3   |                 |
+/// |                | process query 3 |
+/// | receive rows 3 |                 |
+/// ```
+///
+/// In both cases, the PostgreSQL server is executing the queries **sequentially** - pipelining just allows both sides of
+/// the connection to work concurrently when possible.
+///
+/// Pipelining happens automatically when futures are polled concurrently (for example, by using the futures `join`
+/// combinator):
+///
+/// ```rust
+/// # include!("../doctest_setup.rs");
+/// #
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// #     run_test().await.unwrap();
+/// # }
+/// #
+/// # async fn run_test() -> QueryResult<()> {
+/// #     use diesel::sql_types::{Text, Integer};
+/// #     let conn = &mut establish_connection().await;
+///       let q1 = diesel::select(1_i32.into_sql::<Integer>());
+///       let q2 = diesel::select(2_i32.into_sql::<Integer>());
+///
+///       // construct multiple futures for different queries
+///       let f1 = q1.get_result::<i32>(conn);
+///       let f2 = q2.get_result::<i32>(conn);
+///
+///       // wait on both results
+///       let res = futures::try_join!(f1, f2)?;
+///
+///       assert_eq!(res.0, 1);
+///       assert_eq!(res.1, 2);
+///       # Ok(())
+/// # }
 pub struct AsyncPgConnection {
-    conn: tokio_postgres::Client,
-    stmt_cache: StmtCache<diesel::pg::Pg, Statement>,
+    conn: Arc<tokio_postgres::Client>,
+    stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
     transaction_state: AnsiTransactionManager,
-    metadata_cache: PgMetadataCache,
-    next_lookup: Vec<(Option<String>, String)>,
+    metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
 }
 
 #[async_trait::async_trait]
@@ -45,8 +105,12 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-impl<'a> AsyncConnectionGatWorkaround<'a, diesel::pg::Pg> for AsyncPgConnection {
-    type Stream = Pin<Box<dyn Stream<Item = QueryResult<PgRow>> + Send + 'a>>;
+impl<'conn, 'query> AsyncConnectionGatWorkaround<'conn, 'query, diesel::pg::Pg>
+    for AsyncPgConnection
+{
+    type LoadFuture = BoxFuture<'query, QueryResult<Self::Stream>>;
+    type ExecuteFuture = BoxFuture<'query, QueryResult<usize>>;
+    type Stream = BoxStream<'static, QueryResult<PgRow>>;
 
     type Row = PgRow;
 }
@@ -66,11 +130,10 @@ impl AsyncConnection for AsyncPgConnection {
             }
         });
         let mut conn = AsyncPgConnection {
-            conn: client,
-            stmt_cache: StmtCache::new(),
+            conn: Arc::new(client),
+            stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
             transaction_state: AnsiTransactionManager::default(),
-            metadata_cache: PgMetadataCache::new(),
-            next_lookup: Vec::new(),
+            metadata_cache: Arc::new(Mutex::new(Some(PgMetadataCache::new()))),
         };
         conn.set_config_options()
             .await
@@ -78,41 +141,60 @@ impl AsyncConnection for AsyncPgConnection {
         Ok(conn)
     }
 
-    async fn load<'a, T>(
-        &'a mut self,
+    fn load<'conn, 'query, T>(
+        &'conn mut self,
         source: T,
-    ) -> QueryResult<<Self as AsyncConnectionGatWorkaround<'a, Self::Backend>>::Stream>
+    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
     where
-        T: AsQuery + Send,
-        T::Query: QueryFragment<Self::Backend> + QueryId + Send,
+        T: AsQuery + Send + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query,
     {
-        self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
-            let res = conn.query_raw(&*stmt, binds).await.map_err(ErrorHelper)?;
+        let conn = self.conn.clone();
+        let stmt_cache = self.stmt_cache.clone();
+        let metadata_cache = self.metadata_cache.clone();
+        let query = source.as_query();
+        Self::with_prepared_statement(
+            conn,
+            stmt_cache,
+            metadata_cache,
+            query,
+            |conn, stmt, binds| async move {
+                let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
 
-            Ok(res
-                .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
-                .map_ok(PgRow::new)
-                .boxed())
-        })
-        .await
+                Ok(res
+                    .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
+                    .map_ok(PgRow::new)
+                    .boxed())
+            },
+        )
+        .boxed()
     }
 
-    async fn execute_returning_count<T>(&mut self, source: T) -> QueryResult<usize>
+    fn execute_returning_count<'conn, 'query, T>(
+        &'conn mut self,
+        source: T,
+    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
     where
-        T: QueryFragment<Self::Backend> + QueryId + Send,
+        T: QueryFragment<Self::Backend> + QueryId + Send + 'query,
     {
-        self.with_prepared_statement(source, |conn, stmt, binds| async move {
-            let binds = binds
-                .iter()
-                .map(|b| b as &(dyn ToSql + Sync))
-                .collect::<Vec<_>>();
+        Self::with_prepared_statement(
+            self.conn.clone(),
+            self.stmt_cache.clone(),
+            self.metadata_cache.clone(),
+            source,
+            |conn, stmt, binds| async move {
+                let binds = binds
+                    .iter()
+                    .map(|b| b as &(dyn ToSql + Sync))
+                    .collect::<Vec<_>>();
 
-            let res = tokio_postgres::Client::execute(conn, &*stmt, &binds as &[_])
-                .await
-                .map_err(ErrorHelper)?;
-            Ok(res as usize)
-        })
-        .await
+                let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
+                    .await
+                    .map_err(ErrorHelper)?;
+                Ok(res as usize)
+            },
+        )
+        .boxed()
     }
 
     fn transaction_state(
@@ -121,7 +203,7 @@ impl AsyncConnection for AsyncPgConnection {
         &mut self.transaction_state
     }
 
-    async fn transaction<F, R, E>(&mut self, callback: F) -> Result<R, E>
+    async fn transaction<R, E, F>(&mut self, callback: F) -> Result<R, E>
     where
         F: FnOnce(&mut Self) -> futures::future::BoxFuture<Result<R, E>> + Send,
         E: From<diesel::result::Error> + Send,
@@ -149,22 +231,22 @@ impl AsyncConnection for AsyncPgConnection {
 }
 
 #[async_trait::async_trait]
-impl PrepareCallback<Statement, PgTypeMetadata> for tokio_postgres::Client {
+impl PrepareCallback<Statement, PgTypeMetadata> for Arc<tokio_postgres::Client> {
     async fn prepare(
-        &mut self,
+        self,
         sql: &str,
         metadata: &[PgTypeMetadata],
         _is_for_cache: PrepareForCache,
-    ) -> QueryResult<Statement> {
+    ) -> QueryResult<(Statement, Self)> {
         let bind_types = metadata
             .iter()
             .map(type_from_oid)
             .collect::<QueryResult<Vec<_>>>()?;
-
-        Ok(self
+        let stmt = self
             .prepare_typed(sql, &bind_types)
             .await
-            .map_err(ErrorHelper)?)
+            .map_err(ErrorHelper);
+        Ok((stmt?, self))
     }
 }
 
@@ -186,17 +268,43 @@ fn type_from_oid(t: &PgTypeMetadata) -> QueryResult<Type> {
 }
 
 impl AsyncPgConnection {
+    /// Build a transaction, specifying additional details such as isolation level
+    ///
+    /// See [`TransactionBuilder`] for more examples.
+    ///
+    /// [`TransactionBuilder`]: crate::pg::TransactionBuilder
+    ///
+    /// ```rust
+    /// # include!("../doctest_setup.rs");
+    /// # use futures::FutureExt;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     use schema::users::dsl::*;
+    /// #     let conn = &mut connection_no_transaction().await;
+    /// conn.build_transaction()
+    ///     .read_only()
+    ///     .serializable()
+    ///     .deferrable()
+    ///     .run(|conn| async move { Ok(()) }.boxed())
+    ///     .await
+    /// # }
+    /// ```
     pub fn build_transaction(&mut self) -> TransactionBuilder<Self> {
         TransactionBuilder::new(self)
     }
 
+    /// Construct a new `AsyncPgConnection` instance from an existing [`tokio_postgres::Client`]
     pub async fn try_from(conn: tokio_postgres::Client) -> ConnectionResult<Self> {
         let mut conn = Self {
-            conn,
-            stmt_cache: StmtCache::new(),
+            conn: Arc::new(conn),
+            stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
             transaction_state: AnsiTransactionManager::default(),
-            metadata_cache: PgMetadataCache::new(),
-            next_lookup: Vec::new(),
+            metadata_cache: Arc::new(Mutex::new(Some(PgMetadataCache::new()))),
         };
         conn.set_config_options()
             .await
@@ -217,62 +325,90 @@ impl AsyncPgConnection {
     }
 
     async fn with_prepared_statement<'a, T, F, R>(
-        &'a mut self,
+        raw_connection: Arc<tokio_postgres::Client>,
+        stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
+        metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
         query: T,
-        callback: impl FnOnce(
-            &'a mut tokio_postgres::Client,
-            MaybeCached<'a, Statement>,
-            Vec<ToSqlHelper>,
-        ) -> F,
+        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> QueryResult<R>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId + Send,
         F: Future<Output = QueryResult<R>>,
     {
         let mut bind_collector;
-        loop {
-            // we need a new bind collector per iteration here
-            bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
-            let res = query.collect_binds(&mut bind_collector, self, &diesel::pg::Pg);
+        {
+            loop {
+                // we need a new bind collector per iteration here
+                bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
 
-            if !self.next_lookup.is_empty() {
-                for (schema, lookup_type_name) in std::mem::take(&mut self.next_lookup) {
-                    // as this is an async call and we don't want to infect the whole diesel serialization
-                    // api with async we just error out in the `PgMetadataLookup` implementation below if we encounter
-                    // a type that is not cached yet
-                    // If that's the case we will do the lookup here and try again as the
-                    // type is now cached.
-                    let type_metadata =
-                        lookup_type(schema.clone(), lookup_type_name.clone(), self).await?;
-                    self.metadata_cache.store_type(
-                        PgMetadataCacheKey::new(
-                            schema.map(Cow::Owned),
-                            Cow::Owned(lookup_type_name),
-                        ),
-                        type_metadata,
+                let (res, unresolved_types) = {
+                    let mut metadata_cache_lock = metadata_cache.lock().await;
+                    let mut metadata_lookup =
+                        PgAsyncMetadataLookup::new(metadata_cache_lock.take().unwrap_or_default());
+
+                    let res = query.collect_binds(
+                        &mut bind_collector,
+                        &mut metadata_lookup,
+                        &diesel::pg::Pg,
                     );
-                    // just try again to get the binds, now that we've inserted the
-                    // type into the lookup list
+
+                    let PgAsyncMetadataLookup {
+                        unresolved_types,
+                        metadata_cache,
+                    } = metadata_lookup;
+                    *metadata_cache_lock = Some(metadata_cache);
+                    (res, unresolved_types)
+                };
+
+                if !unresolved_types.is_empty() {
+                    for (schema, lookup_type_name) in unresolved_types {
+                        // as this is an async call and we don't want to infect the whole diesel serialization
+                        // api with async we just error out in the `PgMetadataLookup` implementation below if we encounter
+                        // a type that is not cached yet
+                        // If that's the case we will do the lookup here and try again as the
+                        // type is now cached.
+                        let type_metadata =
+                            lookup_type(schema.clone(), lookup_type_name.clone(), &raw_connection)
+                                .await?;
+                        let mut metadata_cache_lock = metadata_cache.lock().await;
+                        let metadata_cache =
+                            if let Some(ref mut metadata_cache) = *metadata_cache_lock {
+                                metadata_cache
+                            } else {
+                                *metadata_cache_lock = Some(Default::default());
+                                metadata_cache_lock.as_mut().expect("We set it above")
+                            };
+
+                        metadata_cache.store_type(
+                            PgMetadataCacheKey::new(
+                                schema.map(Cow::Owned),
+                                Cow::Owned(lookup_type_name),
+                            ),
+                            type_metadata,
+                        );
+                        // just try again to get the binds, now that we've inserted the
+                        // type into the lookup list
+                    }
+                } else {
+                    // bubble up any error as soon as we have done all lookups
+                    let _ = res?;
+                    break;
                 }
-            } else {
-                // bubble up any error as soon as we have done all lookups
-                let _ = res?;
-                break;
             }
         }
 
-        let AsyncPgConnection {
-            ref mut conn,
-            ref mut stmt_cache,
-            ..
-        } = self;
-
-        let conn = &mut *conn;
-
         let stmt = {
+            let mut stmt_cache = stmt_cache.lock().await;
             let stmt = stmt_cache
-                .cached_prepared_statement(query, &bind_collector.metadata, conn, &diesel::pg::Pg)
-                .await?;
+                .cached_prepared_statement(
+                    query,
+                    &bind_collector.metadata,
+                    raw_connection.clone(),
+                    &diesel::pg::Pg,
+                )
+                .await?
+                .0
+                .clone();
             stmt
         };
 
@@ -282,12 +418,25 @@ impl AsyncPgConnection {
             .zip(bind_collector.binds)
             .map(|(meta, bind)| ToSqlHelper(meta, bind))
             .collect::<Vec<_>>();
-
-        callback(&mut self.conn, stmt, binds).await
+        callback(raw_connection, stmt.clone(), binds).await
     }
 }
 
-impl PgMetadataLookup for AsyncPgConnection {
+struct PgAsyncMetadataLookup {
+    unresolved_types: Vec<(Option<String>, String)>,
+    metadata_cache: PgMetadataCache,
+}
+
+impl PgAsyncMetadataLookup {
+    fn new(metadata_cache: PgMetadataCache) -> Self {
+        Self {
+            unresolved_types: Vec::new(),
+            metadata_cache,
+        }
+    }
+}
+
+impl PgMetadataLookup for PgAsyncMetadataLookup {
     fn lookup_type(&mut self, type_name: &str, schema: Option<&str>) -> PgTypeMetadata {
         let cache_key =
             PgMetadataCacheKey::new(schema.map(Cow::Borrowed), Cow::Borrowed(type_name));
@@ -296,7 +445,7 @@ impl PgMetadataLookup for AsyncPgConnection {
             metadata
         } else {
             let cache_key = cache_key.into_owned();
-            self.next_lookup
+            self.unresolved_types
                 .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
             PgTypeMetadata::from_result(Err(FailedToLookupTypeError::new(cache_key)))
         }
@@ -306,55 +455,31 @@ impl PgMetadataLookup for AsyncPgConnection {
 async fn lookup_type(
     schema: Option<String>,
     type_name: String,
-    conn: &mut AsyncPgConnection,
+    raw_connection: &tokio_postgres::Client,
 ) -> QueryResult<(u32, u32)> {
-    use crate::RunQueryDsl;
-    use diesel::prelude::{BoolExpressionMethods, ExpressionMethods, QueryDsl};
-
-    let search_path: String;
-    let mut search_path_has_temp_schema = false;
-
-    let search_schema = match schema.as_ref().map(|a| a as &str) {
-        Some("pg_temp") => {
-            search_path_has_temp_schema = true;
-            Vec::new()
-        }
-        Some(schema) => vec![schema],
-        None => {
-            search_path = diesel::dsl::sql::<diesel::sql_types::Text>("SHOW search_path")
-                .get_result::<String>(conn)
-                .await?;
-
-            search_path
-                .split(',')
-                // skip the `$user` entry for now
-                .filter(|f| !f.starts_with("\"$"))
-                .map(|s| s.trim())
-                .filter(|&f| {
-                    let is_temp = f == "pg_temp";
-                    search_path_has_temp_schema |= is_temp;
-                    !is_temp
-                })
-                .collect()
-        }
-    };
-
-    let metadata_query = pg_type::table
-        .inner_join(pg_namespace::table)
-        .filter(pg_type::typname.eq(type_name))
-        .select((pg_type::oid, pg_type::typarray));
-    let nspname_filter = pg_namespace::nspname.eq_any(search_schema);
-
-    let metadata = if search_path_has_temp_schema {
-        metadata_query
-            .filter(nspname_filter.or(pg_namespace::oid.eq(pg_my_temp_schema())))
-            .first(conn)
-            .await?
+    let r = if let Some(schema) = schema.as_ref() {
+        raw_connection
+            .query_one(
+                "SELECT pg_type.oid, pg_type.typarray FROM pg_type \
+             INNER JOIN pg_namespace ON pg_type.typnamespace = pg_namespace.oid \
+             WHERE pg_type.typname = $1 AND pg_namespace.nspname = $2 \
+             LIMIT 1",
+                &[&type_name, schema],
+            )
+            .await
+            .map_err(ErrorHelper)?
     } else {
-        metadata_query.filter(nspname_filter).first(conn).await?
+        raw_connection
+            .query_one(
+                "SELECT pg_type.oid, pg_type.typarray FROM pg_type \
+             WHERE pg_type.oid = quote_ident($1)::regtype::oid \
+             LIMIT 1",
+                &[&type_name],
+            )
+            .await
+            .map_err(ErrorHelper)?
     };
-
-    QueryResult::Ok(metadata)
+    Ok((r.get(0), r.get(1)))
 }
 
 diesel::table! {
@@ -377,3 +502,31 @@ diesel::joinable!(pg_type -> pg_namespace(typnamespace));
 diesel::allow_tables_to_appear_in_same_query!(pg_type, pg_namespace);
 
 diesel::sql_function! { fn pg_my_temp_schema() -> Oid; }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::run_query_dsl::RunQueryDsl;
+    use diesel::sql_types::Integer;
+    use diesel::IntoSql;
+
+    #[tokio::test]
+    async fn pipelining() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
+        let mut conn = crate::AsyncPgConnection::establish(&database_url)
+            .await
+            .unwrap();
+
+        let q1 = diesel::select(1_i32.into_sql::<Integer>());
+        let q2 = diesel::select(2_i32.into_sql::<Integer>());
+
+        let f1 = q1.get_result::<i32>(&mut conn);
+        let f2 = q2.get_result::<i32>(&mut conn);
+
+        let (r1, r2) = futures::try_join!(f1, f2).unwrap();
+
+        assert_eq!(r1, 1);
+        assert_eq!(r2, 2);
+    }
+}

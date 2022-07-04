@@ -11,7 +11,7 @@ mod type_check;
 
 async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
     let res = conn
-        .transaction::<_, i32, diesel::result::Error>(|conn| {
+        .transaction::<i32, diesel::result::Error, _>(|conn| {
             Box::pin(async move {
                 let users: Vec<User> = users::table.load(conn).await?;
                 assert_eq!(&users[0].name, "John Doe");
@@ -21,7 +21,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                 assert_eq!(user, None::<User>);
 
                 let res = conn
-                    .transaction::<_, _, diesel::result::Error>(|conn| {
+                    .transaction::<_, diesel::result::Error, _>(|conn| {
                         async move {
                             diesel::insert_into(users::table)
                                 .values(users::name.eq("Dave"))
