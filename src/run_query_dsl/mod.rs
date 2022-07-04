@@ -7,6 +7,12 @@ use diesel::result::QueryResult;
 use diesel::AsChangeset;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 
+/// The traits used by `QueryDsl`.
+///
+/// Each trait in this module represents exactly one method from [`RunQueryDsl`].
+/// Apps should general rely on [`RunQueryDsl`] directly, rather than these traits.
+/// However, generic code may need to include a where clause that references
+/// these traits.
 pub mod methods {
     use super::*;
     use crate::AsyncConnectionGatWorkaround;
@@ -17,11 +23,19 @@ pub mod methods {
     use diesel::query_dsl::CompatibleType;
     use futures::{Future, Stream, TryFutureExt};
 
+    /// The `execute` method
+    ///
+    /// This trait should not be relied on directly by most apps. Its behavior is
+    /// provided by [`RunQueryDsl`]. However, you may need a where clause on this trait
+    /// to call `execute` from generic code.
+    ///
+    /// [`RunQueryDsl`]: super::RunQueryDsl
     pub trait ExecuteDsl<Conn, DB = <Conn as AsyncConnection>::Backend>
     where
         Conn: AsyncConnection<Backend = DB>,
         DB: Backend,
     {
+        /// Execute this command
         fn execute<'conn, 'query>(
             query: Self,
             conn: &'conn mut Conn,
@@ -47,15 +61,29 @@ pub mod methods {
         }
     }
 
+    /// This trait is a workaround to emulate GAT on stable rust
+    ///
+    /// It is used to specify the return type of [`LoadQuery::internal_load`]
+    /// which may contain lifetimes
     pub trait LoadQueryGatWorkaround<'conn, 'query, Conn, U> {
+        /// The future returned by [`LoadQuery::internal_load`]
         type LoadFuture: Future<Output = QueryResult<Self::Stream>> + Send;
+        /// The inner stream returned by [`LoadQuery::internal_load`]
         type Stream: Stream<Item = QueryResult<U>> + Send;
     }
 
+    /// The `load` method
+    ///
+    /// This trait should not be relied on directly by most apps. Its behavior is
+    /// provided by [`RunQueryDsl`]. However, you may need a where clause on this trait
+    /// to call `load` from generic code.
+    ///
+    /// [`RunQueryDsl`]: super::RunQueryDsl
     pub trait LoadQuery<'query, Conn: AsyncConnection, U>
     where
         for<'a> Self: LoadQueryGatWorkaround<'a, 'query, Conn, U>,
     {
+        /// Load this query
         fn internal_load<'conn>(
             self,
             conn: &'conn mut Conn,
@@ -130,12 +158,21 @@ pub mod methods {
     }
 }
 
+/// The return types produces by the various [`RunQueryDsl`] methods
+///
+// We cannot box these types as this would require specifying a lifetime,
+// but concrete connection implementations might want to have control
+// about that so that they can support multiple simultan queries on
+// the same connection
 pub mod return_futures {
     use super::methods;
     use crate::{AsyncConnection, AsyncConnectionGatWorkaround};
     use diesel::QueryResult;
     use std::pin::Pin;
 
+    /// The future returned by [`RunQueryDsl::load`] and [`RunQueryDsl::get_results`]
+    ///
+    /// This is essentially `impl Future<Output = QueryResult<Vec<U>>>`
     pub type LoadFuture<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
         <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture,
         futures::stream::TryCollect<
@@ -150,6 +187,9 @@ pub mod return_futures {
         >,
     >;
 
+    /// The future returned by [`RunQueryDsl::get_results`]
+    ///
+    /// This is essentially `impl Future<Output = QueryResult<U>>`
     pub type GetResult<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
         <Q as methods::LoadQueryGatWorkaround<'conn, 'query, Conn, U>>::LoadFuture,
         futures::future::Map<
@@ -182,6 +222,9 @@ pub mod return_futures {
         >,
     >;
 
+    /// The future returned by [`RunQueryDsl::execute`]
+    ///
+    /// This is essentially `impl Future<Output = QueryResult<usize>>`
     pub type Execute<'conn, 'query, Conn> = <Conn as AsyncConnectionGatWorkaround<
         'conn,
         'query,
@@ -189,6 +232,7 @@ pub mod return_futures {
     >>::ExecuteFuture;
 }
 
+/// Methods used to execute queries.
 pub trait RunQueryDsl<Conn>: Sized {
     /// Executes the given command, returning the number of rows affected.
     ///
@@ -650,8 +694,57 @@ pub trait RunQueryDsl<Conn>: Sized {
 
 impl<T, Conn> RunQueryDsl<Conn> for T {}
 
+/// Sugar for types which implement both `AsChangeset` and `Identifiable`
+///
+/// On backends which support the `RETURNING` keyword,
+/// `foo.save_changes(&conn)` is equivalent to
+/// `update(&foo).set(&foo).get_result(&conn)`.
+/// On other backends, two queries will be executed.
+///
+/// # Example
+///
+/// ```rust
+/// # include!("../doctest_setup.rs");
+/// # use schema::animals;
+/// #
+/// #[derive(Queryable, Debug, PartialEq)]
+/// struct Animal {
+///    id: i32,
+///    species: String,
+///    legs: i32,
+///    name: Option<String>,
+/// }
+///
+/// #[derive(AsChangeset, Identifiable)]
+/// #[diesel(table_name = animals)]
+/// struct AnimalForm<'a> {
+///     id: i32,
+///     name: &'a str,
+/// }
+///
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// #     run_test().await.unwrap();
+/// # }
+/// #
+/// # async fn run_test() -> QueryResult<()> {
+/// #     use self::animals::dsl::*;
+/// #     let connection = &mut establish_connection().await;
+/// let form = AnimalForm { id: 2, name: "Super scary" };
+/// let changed_animal = form.save_changes(connection).await?;
+/// let expected_animal = Animal {
+///     id: 2,
+///     species: String::from("spider"),
+///     legs: 8,
+///     name: Some(String::from("Super scary")),
+/// };
+/// assert_eq!(expected_animal, changed_animal);
+/// #     Ok(())
+/// # }
+/// ```
 #[async_trait::async_trait]
 pub trait SaveChangesDsl<Conn> {
+    /// See the trait documentation
     async fn save_changes<T>(self, connection: &mut Conn) -> QueryResult<T>
     where
         Self: Sized,
@@ -666,6 +759,16 @@ impl<T, Conn> SaveChangesDsl<Conn> for T where
 {
 }
 
+/// A trait defining how to update a record and fetch the updated entry
+/// on a certain backend.
+///
+/// The only case where it is required to work with this trait is while
+/// implementing a new connection type.
+/// Otherwise use [`SaveChangesDsl`]
+///
+/// For implementing this trait for a custom backend:
+/// * The `Changes` generic parameter represents the changeset that should be stored
+/// * The `Output` generic parameter represents the type of the response.
 #[async_trait::async_trait]
 pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnection {
     /// See the traits documentation.

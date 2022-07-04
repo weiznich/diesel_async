@@ -21,6 +21,8 @@ use self::error_helper::ErrorHelper;
 use self::row::MysqlRow;
 use self::serialize::ToSqlHelper;
 
+/// A connection to a MySQL database. Connection URLs should be in the form
+/// `mysql://[user[:password]@]host/database_name`
 pub struct AsyncMysqlConnection {
     conn: mysql_async::Conn,
     stmt_cache: StmtCache<Mysql, Statement>,
@@ -138,6 +140,10 @@ impl PrepareCallback<Statement, MysqlType> for &'_ mut mysql_async::Conn {
 }
 
 impl AsyncMysqlConnection {
+    /// Wrap an existing [`mysql_async::Conn`] into a async diesel mysql connection
+    ///
+    /// This function constructs a new `AsyncMysqlConnection` based on an existing
+    /// [`mysql_async::Conn]`.
     pub async fn try_from(conn: mysql_async::Conn) -> ConnectionResult<Self> {
         use crate::run_query_dsl::RunQueryDsl;
         let mut conn = AsyncMysqlConnection {

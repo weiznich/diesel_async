@@ -1,3 +1,11 @@
+use self::error_helper::ErrorHelper;
+use self::row::PgRow;
+use self::serialize::ToSqlHelper;
+use crate::stmt_cache::{PrepareCallback, StmtCache};
+use crate::{
+    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
+    TransactionManager,
+};
 use diesel::connection::statement_cache::PrepareForCache;
 use diesel::pg::{
     FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata,
@@ -15,23 +23,74 @@ use tokio_postgres::types::ToSql;
 use tokio_postgres::types::Type;
 use tokio_postgres::Statement;
 
+pub use self::transaction_builder::TransactionBuilder;
+
 mod error_helper;
 mod row;
 mod serialize;
 mod transaction_builder;
 
-use self::error_helper::ErrorHelper;
-use self::row::PgRow;
-use self::serialize::ToSqlHelper;
-
-pub use self::transaction_builder::TransactionBuilder;
-
-use crate::stmt_cache::{PrepareCallback, StmtCache};
-use crate::{
-    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
-    TransactionManager,
-};
-
+/// A connection to a PostgreSQL database.
+///
+/// Connection URLs should be in the form
+/// `postgres://[user[:password]@]host/database_name`
+///
+/// Checkout the documentation of the [tokio_postgres]
+/// crate for details about the format
+///
+/// [tokio_postgres]: https://docs.rs/tokio-postgres/0.7.6/tokio_postgres/config/struct.Config.html#url
+///
+/// This connection supports *pipelined* requests. Pipelining can improve performance in use cases in which multiple,
+/// independent queries need to be executed. In a traditional workflow, each query is sent to the server after the
+/// previous query completes. In contrast, pipelining allows the client to send all of the queries to the server up
+/// front, minimizing time spent by one side waiting for the other to finish sending data:
+///
+/// ```not_rust
+///             Sequential                              Pipelined
+/// | Client         | Server          |    | Client         | Server          |
+/// |----------------|-----------------|    |----------------|-----------------|
+/// | send query 1   |                 |    | send query 1   |                 |
+/// |                | process query 1 |    | send query 2   | process query 1 |
+/// | receive rows 1 |                 |    | send query 3   | process query 2 |
+/// | send query 2   |                 |    | receive rows 1 | process query 3 |
+/// |                | process query 2 |    | receive rows 2 |                 |
+/// | receive rows 2 |                 |    | receive rows 3 |                 |
+/// | send query 3   |                 |
+/// |                | process query 3 |
+/// | receive rows 3 |                 |
+/// ```
+///
+/// In both cases, the PostgreSQL server is executing the queries **sequentially** - pipelining just allows both sides of
+/// the connection to work concurrently when possible.
+///
+/// Pipelining happens automatically when futures are polled concurrently (for example, by using the futures `join`
+/// combinator):
+///
+/// ```rust
+/// # include!("../doctest_setup.rs");
+/// #
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// #     run_test().await.unwrap();
+/// # }
+/// #
+/// # async fn run_test() -> QueryResult<()> {
+/// #     use diesel::sql_types::{Text, Integer};
+/// #     let conn = &mut establish_connection().await;
+///       let q1 = diesel::select(1_i32.into_sql::<Integer>());
+///       let q2 = diesel::select(2_i32.into_sql::<Integer>());
+///
+///       // construct multiple futures for different queries
+///       let f1 = q1.get_result::<i32>(conn);
+///       let f2 = q2.get_result::<i32>(conn);
+///
+///       // wait on both results
+///       let res = futures::try_join!(f1, f2)?;
+///
+///       assert_eq!(res.0, 1);
+///       assert_eq!(res.1, 2);
+///       # Ok(())
+/// # }
 pub struct AsyncPgConnection {
     conn: Arc<tokio_postgres::Client>,
     stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
@@ -144,7 +203,7 @@ impl AsyncConnection for AsyncPgConnection {
         &mut self.transaction_state
     }
 
-    async fn transaction<F, R, E>(&mut self, callback: F) -> Result<R, E>
+    async fn transaction<R, E, F>(&mut self, callback: F) -> Result<R, E>
     where
         F: FnOnce(&mut Self) -> futures::future::BoxFuture<Result<R, E>> + Send,
         E: From<diesel::result::Error> + Send,
@@ -183,7 +242,6 @@ impl PrepareCallback<Statement, PgTypeMetadata> for Arc<tokio_postgres::Client> 
             .iter()
             .map(type_from_oid)
             .collect::<QueryResult<Vec<_>>>()?;
-
         let stmt = self
             .prepare_typed(sql, &bind_types)
             .await
@@ -210,10 +268,37 @@ fn type_from_oid(t: &PgTypeMetadata) -> QueryResult<Type> {
 }
 
 impl AsyncPgConnection {
+    /// Build a transaction, specifying additional details such as isolation level
+    ///
+    /// See [`TransactionBuilder`] for more examples.
+    ///
+    /// [`TransactionBuilder`]: crate::pg::TransactionBuilder
+    ///
+    /// ```rust
+    /// # include!("../doctest_setup.rs");
+    /// # use futures::FutureExt;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     use schema::users::dsl::*;
+    /// #     let conn = &mut connection_no_transaction().await;
+    /// conn.build_transaction()
+    ///     .read_only()
+    ///     .serializable()
+    ///     .deferrable()
+    ///     .run(|conn| async move { Ok(()) }.boxed())
+    ///     .await
+    /// # }
+    /// ```
     pub fn build_transaction(&mut self) -> TransactionBuilder<Self> {
         TransactionBuilder::new(self)
     }
 
+    /// Construct a new `AsyncPgConnection` instance from an existing [`tokio_postgres::Client`]
     pub async fn try_from(conn: tokio_postgres::Client) -> ConnectionResult<Self> {
         let mut conn = Self {
             conn: Arc::new(conn),
@@ -422,7 +507,7 @@ diesel::sql_function! { fn pg_my_temp_schema() -> Oid; }
 pub mod tests {
     use super::*;
     use crate::run_query_dsl::RunQueryDsl;
-    use diesel::sql_types::{Integer, Text};
+    use diesel::sql_types::Integer;
     use diesel::IntoSql;
 
     #[tokio::test]
@@ -433,22 +518,15 @@ pub mod tests {
             .await
             .unwrap();
 
-        let q1 = diesel::select((
-            1_i32.into_sql::<Integer>(),
-            diesel::dsl::sql::<Text>("pg_sleep(10)::text"),
-        ));
-        let q2 = diesel::select((
-            2_i32.into_sql::<Integer>(),
-            diesel::dsl::sql::<Text>("pg_sleep(0.1)::text"),
-        ));
+        let q1 = diesel::select(1_i32.into_sql::<Integer>());
+        let q2 = diesel::select(2_i32.into_sql::<Integer>());
 
-        let f1 = q1.load::<(i32, String)>(&mut conn);
-        let f2 = q2.load::<(i32, String)>(&mut conn);
+        let f1 = q1.get_result::<i32>(&mut conn);
+        let f2 = q2.get_result::<i32>(&mut conn);
 
-        let res = tokio::select! {
-            v = f1 => v.unwrap(),
-            v = f2 => v.unwrap(),
-        };
-        assert_eq!(res[0].0, 2);
+        let (r1, r2) = futures::try_join!(f1, f2).unwrap();
+
+        assert_eq!(r1, 1);
+        assert_eq!(r2, 2);
     }
 }
