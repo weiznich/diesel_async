@@ -6,8 +6,8 @@
 //! * [bb8](self::bb8)
 //! * [mobc](self::mobc)
 
-use crate::{AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection};
 use crate::TransactionManager;
+use crate::{AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection};
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::DerefMut;
@@ -60,7 +60,7 @@ impl<C> AsyncDieselConnectionManager<C> {
     pub fn new(connection_url: impl Into<String>) -> Self {
         Self {
             p: PhantomData,
-            connection_url: connection_url.into()
+            connection_url: connection_url.into(),
         }
     }
 }
@@ -98,12 +98,13 @@ where
 {
     type Backend = <C::Target as AsyncConnection>::Backend;
 
-    type TransactionManager = PoolTransactionManager<<C::Target as AsyncConnection>::TransactionManager>;
+    type TransactionManager =
+        PoolTransactionManager<<C::Target as AsyncConnection>::TransactionManager>;
 
     async fn establish(_database_url: &str) -> diesel::ConnectionResult<Self> {
-        Err(diesel::result::ConnectionError::BadConnection(String::from(
-            "Cannot directly establish a pooled connection",
-        )))
+        Err(diesel::result::ConnectionError::BadConnection(
+            String::from("Cannot directly establish a pooled connection"),
+        ))
     }
 
     fn load<'conn, 'query, T>(
