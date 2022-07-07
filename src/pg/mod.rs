@@ -482,26 +482,8 @@ async fn lookup_type(
     Ok((r.get(0), r.get(1)))
 }
 
-diesel::table! {
-    pg_type (oid) {
-        oid -> Oid,
-        typname -> Text,
-        typarray -> Oid,
-        typnamespace -> Oid,
-    }
-}
-
-diesel::table! {
-    pg_namespace (oid) {
-        oid -> Oid,
-        nspname -> Text,
-    }
-}
-
-diesel::joinable!(pg_type -> pg_namespace(typnamespace));
-diesel::allow_tables_to_appear_in_same_query!(pg_type, pg_namespace);
-
-diesel::sql_function! { fn pg_my_temp_schema() -> Oid; }
+#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
+impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {}
 
 #[cfg(test)]
 pub mod tests {

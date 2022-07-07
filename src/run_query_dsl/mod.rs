@@ -135,6 +135,7 @@ pub mod methods {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn map_result_stream_future<'s, 'a, U, S, R, DB, ST>(
         stream: S,
     ) -> futures::stream::Map<S, fn(QueryResult<R>) -> QueryResult<U>>
@@ -401,8 +402,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         // this function pointer
 
         let f = collect_result::<U, _> as _;
-        let r = load_future.and_then(f);
-        r
+        load_future.and_then(f)
     }
 
     /// Executes the given query, returning a [`Stream`] with the returned rows.
@@ -593,6 +593,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         Conn: AsyncConnection,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
+        #[allow(clippy::type_complexity)]
         fn get_next_stream_element<S, U>(
             stream: S,
         ) -> futures::future::Map<
@@ -613,8 +614,7 @@ pub trait RunQueryDsl<Conn>: Sized {
 
             let stream = Box::pin(stream);
             let f = map_option_to_result as _;
-            let s = stream.into_future().map(f);
-            s
+            stream.into_future().map(f)
         }
         let f = get_next_stream_element as _;
         self.load_stream(conn).and_then(f)

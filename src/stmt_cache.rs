@@ -13,6 +13,11 @@ pub struct StmtCache<DB: Backend, S> {
     cache: HashMap<StatementCacheKey<DB>, S>,
 }
 
+type PrepareFuture<'a, F, S> = futures::future::Either<
+    futures::future::Ready<QueryResult<(MaybeCached<'a, S>, F)>>,
+    BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
+>;
+
 #[async_trait::async_trait]
 pub trait PrepareCallback<S, M> {
     async fn prepare(
@@ -38,21 +43,18 @@ impl<S, DB: Backend> StmtCache<DB, S> {
         metadata: &[DB::TypeMetadata],
         prepare_fn: F,
         backend: &DB,
-    ) -> futures::future::Either<
-        futures::future::Ready<QueryResult<(MaybeCached<'a, S>, F)>>,
-        BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
-    >
+    ) -> PrepareFuture<'a, F, S>
     where
         S: Send,
         DB::QueryBuilder: Default,
         DB::TypeMetadata: Clone + Send + Sync,
         T: QueryFragment<DB> + QueryId + Send,
-        F: PrepareCallback<S, DB::TypeMetadata> + Send  + 'a,
+        F: PrepareCallback<S, DB::TypeMetadata> + Send + 'a,
         StatementCacheKey<DB>: Hash + Eq,
     {
         use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-        let cache_key = match StatementCacheKey::for_source(&query, &metadata, backend) {
+        let cache_key = match StatementCacheKey::for_source(&query, metadata, backend) {
             Ok(key) => key,
             Err(e) => return futures::future::Either::Left(futures::future::ready(Err(e))),
         };
@@ -80,9 +82,10 @@ impl<S, DB: Backend> StmtCache<DB, S> {
         }
 
         match self.cache.entry(cache_key) {
-            Occupied(entry) => futures::future::Either::Left(futures::future::ready(Ok(
-                (MaybeCached::Cached(entry.into_mut()), prepare_fn)
-            ))),
+            Occupied(entry) => futures::future::Either::Left(futures::future::ready(Ok((
+                MaybeCached::Cached(entry.into_mut()),
+                prepare_fn,
+            )))),
             Vacant(entry) => {
                 let sql = match entry.key().sql(&query, backend) {
                     Ok(sql) => sql.into_owned(),
