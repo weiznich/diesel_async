@@ -77,20 +77,19 @@ jobs:
         if: runner.os == 'macOS' && matrix.backend == 'mysql'
         run: |
           brew update
-          brew install mariadb@10.5
-          /usr/local/opt/mariadb@10.5/bin/mysql_install_db
-          /usr/local/opt/mariadb@10.5/bin/mysql.server start
+          brew install mariadb@10.8
+          /usr/local/opt/mariadb@10.8/bin/mysql_install_db
+          /usr/local/opt/mariadb@10.8/bin/mysql.server start
           sleep 3
-          /usr/local/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
-          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
+          /usr/local/opt/mariadb@10.8/bin/mysql -e "ALTER USER 'runner'@'localhost' IDENTIFIED BY 'diesel';" -urunner
+          /usr/local/opt/mariadb@10.8/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner -pdiesel
+          echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install postgres (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'postgres'
         shell: bash
         run: |
-          choco install postgresql12 --force --params '/Password:root'
-          echo "C:\Program Files\PostgreSQL\12\bin" >> $GITHUB_PATH
-          echo "C:\Program Files\PostgreSQL\12\lib" >> $GITHUB_PATH
+          choco install postgresql14 --force --params '/Password:root'
           echo "DATABASE_URL=postgres://postgres:root@localhost/" >> $GITHUB_ENV
 
       - name: Install mysql (Windows)
@@ -130,7 +129,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.54.0
+          toolchain: stable
           profile: minimal
           components: clippy, rustfmt
           override: true
