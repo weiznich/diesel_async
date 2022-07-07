@@ -75,6 +75,8 @@ mod pg;
 mod run_query_dsl;
 mod stmt_cache;
 mod transaction_manager;
+#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
+pub mod pooled_connection;
 
 #[cfg(feature = "mysql")]
 pub use self::mysql::AsyncMysqlConnection;

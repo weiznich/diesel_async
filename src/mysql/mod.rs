@@ -213,3 +213,6 @@ impl AsyncMysqlConnection {
         }).boxed()
     }
 }
+
+#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
+impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {}
