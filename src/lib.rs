@@ -224,11 +224,16 @@ where
                 Self::TransactionManager::commit_transaction(self).await?;
                 Ok(value)
             }
-            Err(e) => {
-                Self::TransactionManager::rollback_transaction(self)
-                    .await
-                    .map_err(|e| diesel::result::Error::RollbackError(Box::new(e)))?;
-                Err(e)
+            Err(user_error) => {
+                match Self::TransactionManager::rollback_transaction(self).await {
+                    Ok(()) => Err(user_error),
+                    Err(diesel::result::Error::BrokenTransactionManager) => {
+                        // In this case we are probably more interested by the
+                        // original error, which likely caused this
+                        Err(user_error)
+                    }
+                    Err(rollback_error) => Err(rollback_error.into()),
+                }
             }
         }
     }
