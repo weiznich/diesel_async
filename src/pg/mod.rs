@@ -396,7 +396,7 @@ impl AsyncPgConnection {
                     }
                 } else {
                     // bubble up any error as soon as we have done all lookups
-                    let _ = res?;
+                    res?;
                     break;
                 }
             }
