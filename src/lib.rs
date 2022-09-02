@@ -84,7 +84,7 @@ pub use self::mysql::AsyncMysqlConnection;
 pub use self::pg::AsyncPgConnection;
 pub use self::run_query_dsl::*;
 
-use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
+pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 
 /// Perform simple operations on a backend.
 ///
