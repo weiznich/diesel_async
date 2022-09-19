@@ -1,6 +1,6 @@
-//! Diesel-async provides async variants of diesel releated query functionality
+//! Diesel-async provides async variants of diesel related query functionality
 //!
-//! diesel-async is an extension to diesel itself. It is designed to be used togehter
+//! diesel-async is an extension to diesel itself. It is designed to be used together
 //! with the main diesel crate. It only provides async variants of core diesel traits,
 //! that perform actual io-work.
 //! This includes async counterparts the following traits:
@@ -140,7 +140,7 @@ where
     ///
     /// This function executes the provided closure `f` inside a database
     /// transaction. If there is already an open transaction for the current
-    /// connection savepoints will be used instead. The connection is commited if
+    /// connection savepoints will be used instead. The connection is committed if
     /// the closure returns `Ok(_)`, it will be rolled back if it returns `Err(_)`.
     /// For both cases the original result value will be returned from this function.
     ///
