@@ -4,7 +4,6 @@ use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{
     AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
-    TransactionManager,
 };
 use diesel::connection::statement_cache::PrepareForCache;
 use diesel::pg::{
@@ -94,7 +93,7 @@ mod transaction_builder;
 pub struct AsyncPgConnection {
     conn: Arc<tokio_postgres::Client>,
     stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
-    transaction_state: AnsiTransactionManager,
+    transaction_state: Arc<Mutex<AnsiTransactionManager>>,
     metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
 }
 
@@ -152,11 +151,13 @@ impl AsyncConnection for AsyncPgConnection {
         let conn = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
         let metadata_cache = self.metadata_cache.clone();
+        let tm = self.transaction_state.clone();
         let query = source.as_query();
         Self::with_prepared_statement(
             conn,
             stmt_cache,
             metadata_cache,
+            tm,
             query,
             |conn, stmt, binds| async move {
                 let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
@@ -181,6 +182,7 @@ impl AsyncConnection for AsyncPgConnection {
             self.conn.clone(),
             self.stmt_cache.clone(),
             self.metadata_cache.clone(),
+            self.transaction_state.clone(),
             source,
             |conn, stmt, binds| async move {
                 let binds = binds
@@ -197,42 +199,33 @@ impl AsyncConnection for AsyncPgConnection {
         .boxed()
     }
 
-    fn transaction_state(
-        &mut self,
-    ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData {
-        &mut self.transaction_state
-    }
-
-    async fn transaction<R, E, F>(&mut self, callback: F) -> Result<R, E>
-    where
-        F: FnOnce(&mut Self) -> futures::future::BoxFuture<Result<R, E>> + Send,
-        E: From<diesel::result::Error> + Send,
-        R: Send,
-    {
-        Self::TransactionManager::begin_transaction(self).await?;
-        match callback(&mut *self).await {
-            Ok(value) => {
-                Self::TransactionManager::commit_transaction(self).await?;
-                Ok(value)
-            }
-            Err(user_error) => {
-                match Self::TransactionManager::rollback_transaction(self).await {
-                    Ok(()) => Err(user_error),
-                    Err(diesel::result::Error::BrokenTransactionManager) => {
-                        // In this case we are probably more interested by the
-                        // original error, which likely caused this
-                        Err(user_error)
-                    }
-                    Err(rollback_error) => Err(rollback_error.into()),
-                }
-            }
+    fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(tm) = Arc::get_mut(&mut self.transaction_state) {
+            tm.get_mut()
+        } else {
+            panic!("Cannot access shared transaction state")
         }
     }
+}
 
-    async fn begin_test_transaction(&mut self) -> QueryResult<()> {
-        assert_eq!(Self::TransactionManager::get_transaction_depth(self), 0);
-        Self::TransactionManager::begin_transaction(self).await
+#[inline(always)]
+fn update_transaction_manager_status<T>(
+    query_result: QueryResult<T>,
+    transaction_manager: &mut AnsiTransactionManager,
+) -> QueryResult<T> {
+    if let Err(diesel::result::Error::DatabaseError(
+        diesel::result::DatabaseErrorKind::SerializationFailure,
+        _,
+    )) = query_result
+    {
+        transaction_manager
+            .status
+            .set_top_level_transaction_requires_rollback()
     }
+    query_result
 }
 
 #[async_trait::async_trait]
@@ -308,7 +301,7 @@ impl AsyncPgConnection {
         let mut conn = Self {
             conn: Arc::new(conn),
             stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
-            transaction_state: AnsiTransactionManager::default(),
+            transaction_state: Arc::new(Mutex::new(AnsiTransactionManager::default())),
             metadata_cache: Arc::new(Mutex::new(Some(PgMetadataCache::new()))),
         };
         conn.set_config_options()
@@ -333,6 +326,7 @@ impl AsyncPgConnection {
         raw_connection: Arc<tokio_postgres::Client>,
         stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
         metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
+        tm: Arc<Mutex<AnsiTransactionManager>>,
         query: T,
         callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> QueryResult<R>
@@ -396,7 +390,7 @@ impl AsyncPgConnection {
                     }
                 } else {
                     // bubble up any error as soon as we have done all lookups
-                    let _ = res?;
+                    res?;
                     break;
                 }
             }
@@ -404,7 +398,7 @@ impl AsyncPgConnection {
 
         let stmt = {
             let mut stmt_cache = stmt_cache.lock().await;
-            let stmt = stmt_cache
+            stmt_cache
                 .cached_prepared_statement(
                     query,
                     &bind_collector.metadata,
@@ -413,8 +407,7 @@ impl AsyncPgConnection {
                 )
                 .await?
                 .0
-                .clone();
-            stmt
+                .clone()
         };
 
         let binds = bind_collector
@@ -423,7 +416,9 @@ impl AsyncPgConnection {
             .zip(bind_collector.binds)
             .map(|(meta, bind)| ToSqlHelper(meta, bind))
             .collect::<Vec<_>>();
-        callback(raw_connection, stmt.clone(), binds).await
+        let res = callback(raw_connection, stmt.clone(), binds).await;
+        let mut tm = tm.lock().await;
+        update_transaction_manager_status(res, &mut *tm)
     }
 }
 

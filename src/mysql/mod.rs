@@ -126,6 +126,23 @@ impl AsyncConnection for AsyncMysqlConnection {
     }
 }
 
+#[inline(always)]
+fn update_transaction_manager_status<T>(
+    query_result: QueryResult<T>,
+    transaction_manager: &mut AnsiTransactionManager,
+) -> QueryResult<T> {
+    if let Err(diesel::result::Error::DatabaseError(
+        diesel::result::DatabaseErrorKind::SerializationFailure,
+        _,
+    )) = query_result
+    {
+        transaction_manager
+            .status
+            .set_top_level_transaction_requires_rollback()
+    }
+    query_result
+}
+
 #[async_trait::async_trait]
 impl PrepareCallback<Statement, MysqlType> for &'_ mut mysql_async::Conn {
     async fn prepare(
@@ -194,6 +211,7 @@ impl AsyncMysqlConnection {
             ref mut conn,
             ref mut stmt_cache,
             ref mut last_stmt,
+            ref mut transaction_manager,
             ..
         } = self;
 
@@ -209,7 +227,7 @@ impl AsyncMysqlConnection {
                 MaybeCached::Cached(s) => s,
                 _ => unreachable!("We've opted into breaking diesel changes and want to know if things break because someone added a new variant here")
             };
-            callback(conn, stmt, ToSqlHelper{metadata, binds}).await
+            update_transaction_manager_status(callback(conn, stmt, ToSqlHelper{metadata, binds}).await, transaction_manager)
         }).boxed()
     }
 }
