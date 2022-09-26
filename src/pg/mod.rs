@@ -128,16 +128,7 @@ impl AsyncConnection for AsyncPgConnection {
                 eprintln!("connection error: {}", e);
             }
         });
-        let mut conn = AsyncPgConnection {
-            conn: Arc::new(client),
-            stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
-            transaction_state: AnsiTransactionManager::default(),
-            metadata_cache: Arc::new(Mutex::new(Some(PgMetadataCache::new()))),
-        };
-        conn.set_config_options()
-            .await
-            .map_err(ConnectionError::CouldntSetupConfiguration)?;
-        Ok(conn)
+        Self::try_from(client).await
     }
 
     fn load<'conn, 'query, T>(

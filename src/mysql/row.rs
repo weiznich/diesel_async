@@ -135,7 +135,7 @@ impl<'a> diesel::row::Field<'a, Mysql> for MysqlField<'_> {
     fn value(&self) -> Option<diesel::backend::RawValue<Mysql>> {
         self.value.as_ref().map(|v| {
             MysqlValue::new(
-                &*v,
+                v,
                 convert_type(self.column.column_type(), self.column.flags()),
             )
         })
