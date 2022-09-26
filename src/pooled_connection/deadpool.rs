@@ -9,6 +9,7 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
+//! #     establish_connection().await;
 //! #     run_test().await.unwrap();
 //! # }
 //! #
