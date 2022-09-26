@@ -162,6 +162,10 @@ where
     /// If a nested transaction fails to release the corresponding savepoint
     /// the error will be returned directly.
     ///
+    /// **WARNING:** Cancling the returned future does currently **not**
+    /// close an already open transaction. You may end up with a connection
+    /// containing a dangling transaction.
+    ///
     /// # Example
     ///
     /// ```rust
