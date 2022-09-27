@@ -1,7 +1,7 @@
 #![cfg_attr(doc_cfg, feature(doc_cfg, doc_auto_cfg))]
-//! Diesel-async provides async variants of diesel releated query functionality
+//! Diesel-async provides async variants of diesel related query functionality
 //!
-//! diesel-async is an extension to diesel itself. It is designed to be used togehter
+//! diesel-async is an extension to diesel itself. It is designed to be used together
 //! with the main diesel crate. It only provides async variants of core diesel traits,
 //! that perform actual io-work.
 //! This includes async counterparts the following traits:
