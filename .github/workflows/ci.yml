@@ -68,10 +68,10 @@ jobs:
       - name: Install postgres (MacOS)
         if: runner.os == 'macOS' && matrix.backend == 'postgres'
         run: |
-          /usr/local/opt/postgres/bin/initdb -D /usr/local/var/postgres
-          /usr/local/opt/postgres/bin/pg_ctl -D /usr/local/var/postgres start
+          initdb -D /usr/local/var/postgres
+          pg_ctl -D /usr/local/var/postgres start
           sleep 3
-          /usr/local/opt/postgres/bin/createuser -s postgres
+          createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS)
