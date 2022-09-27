@@ -9,7 +9,6 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
-//! #     establish_connection().await;
 //! #     run_test().await.unwrap();
 //! # }
 //! #
@@ -32,6 +31,10 @@
 //! #     let config = get_config();
 //!   let pool = Pool::new(config);
 //!   let mut conn = pool.get().await?;
+//! # conn.begin_test_transaction();
+//! # clear_tables(&mut conn);
+//! # create_tables(&mut conn);
+//! # conn.begin_test_transaction();
 //!   let res = users.load::<(i32, String)>(&mut conn).await?;
 //! #     Ok(())
 //! # }

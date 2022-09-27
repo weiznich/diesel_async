@@ -11,29 +11,30 @@ cfg_if::cfg_if! {
             AsyncPgConnection::establish(&connection_url).await.unwrap()
         }
 
+        async fn clear_tables(connection: &mut AsyncPgConnection) {
+            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(connection).await.unwrap();
+        }
+
         async fn connection_no_data() -> AsyncPgConnection {
             let mut connection = connection_no_transaction().await;
             connection.begin_test_transaction().await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(&mut connection).await.unwrap();
-
+            clear_tables(&mut connection).await;
             connection
         }
 
-        #[allow(dead_code)]
-        async fn establish_connection() -> AsyncPgConnection {
-            let mut connection = connection_no_data().await;
+        async fn create_tables(connection: &mut AsyncPgConnection) {
 
             diesel::sql_query("CREATE TABLE users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR NOT NULL
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
             diesel::sql_query(
                 "INSERT INTO users (name) VALUES ('Sean'), ('Tess')"
-            ).execute(&mut connection).await.unwrap();
+            ).execute(connection).await.unwrap();
 
             diesel::sql_query(
                 "CREATE TABLE animals (
@@ -41,12 +42,12 @@ cfg_if::cfg_if! {
                 species VARCHAR NOT NULL,
                 legs INTEGER NOT NULL,
                 name VARCHAR
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
             diesel::sql_query(
                 "INSERT INTO animals (species, legs, name) VALUES
                                ('dog', 4, 'Jack'),
                                ('spider', 8, null)"
-            ).execute(&mut connection)
+            ).execute(connection)
              .await.unwrap();
 
             diesel::sql_query(
@@ -54,57 +55,62 @@ cfg_if::cfg_if! {
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 title VARCHAR NOT NULL
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
             diesel::sql_query(
                 "INSERT INTO posts (user_id, title) VALUES
                 (1, 'My first post'),
                 (1, 'About Rust'),
-                (2, 'My first post too')").execute(&mut connection).await.unwrap();
+                (2, 'My first post too')").execute(connection).await.unwrap();
 
             diesel::sql_query("CREATE TABLE comments (
                 id SERIAL PRIMARY KEY,
                 post_id INTEGER NOT NULL,
                 body VARCHAR NOT NULL
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
             diesel::sql_query("INSERT INTO comments (post_id, body) VALUES
                 (1, 'Great post'),
                 (2, 'Yay! I am learning Rust'),
-                (3, 'I enjoyed your post')").execute(&mut connection).await.unwrap();
+                (3, 'I enjoyed your post')").execute(connection).await.unwrap();
 
             diesel::sql_query("CREATE TABLE brands (
                 id SERIAL PRIMARY KEY,
                 color VARCHAR NOT NULL DEFAULT 'Green',
                 accent VARCHAR DEFAULT 'Blue'
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
+        }
 
+        #[allow(dead_code)]
+        async fn establish_connection() -> AsyncPgConnection {
+            let mut connection = connection_no_data().await;
+            create_tables(&mut connection).await;
             connection
         }
     }  else if #[cfg(feature = "mysql")] {
         #[allow(dead_code)]
         type DB = diesel::mysql::Mysql;
 
+        async fn clear_tables(connection: &mut AsyncMysqlConnection) {
+            diesel::sql_query("SET FOREIGN_KEY_CHECKS=0;").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(connection).await.unwrap();
+            diesel::sql_query("SET FOREIGN_KEY_CHECKS=1;").execute(connection).await.unwrap();
+        }
+
         async fn connection_no_data() -> AsyncMysqlConnection {
             let connection_url = database_url_from_env("MYSQL_UNIT_TEST_DATABASE_URL");
             let mut connection = AsyncMysqlConnection::establish(&connection_url).await.unwrap();
-            diesel::sql_query("SET FOREIGN_KEY_CHECKS=0;").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(&mut connection).await.unwrap();
-            diesel::sql_query("SET FOREIGN_KEY_CHECKS=1;").execute(&mut connection).await.unwrap();
-
+            clear_tables(&mut connection).await;
             connection
         }
 
-        #[allow(dead_code)]
-        async fn establish_connection() -> AsyncMysqlConnection {
-            let mut connection = connection_no_data().await;
-
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS users (
+        async fn create_tables(connection: &mut AsyncMysqlConnection) {
+               diesel::sql_query("CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 name TEXT NOT NULL
-            ) CHARACTER SET utf8mb4").execute(&mut connection).await.unwrap();
+            ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
 
             diesel::sql_query("CREATE TABLE IF NOT EXISTS animals (
@@ -112,38 +118,45 @@ cfg_if::cfg_if! {
                 species TEXT NOT NULL,
                 legs INTEGER NOT NULL,
                 name TEXT
-            ) CHARACTER SET utf8mb4").execute(&mut connection).await.unwrap();
+            ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
             diesel::sql_query("CREATE TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL
-            ) CHARACTER SET utf8mb4").execute(&mut connection).await.unwrap();
+            ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
             diesel::sql_query("CREATE TABLE IF NOT EXISTS comments (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 post_id INTEGER NOT NULL,
                 body TEXT NOT NULL
-            ) CHARACTER SET utf8mb4").execute(&mut connection).await.unwrap();
+            ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
             diesel::sql_query("CREATE TABLE IF NOT EXISTS brands (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 color VARCHAR(255) NOT NULL DEFAULT 'Green',
                 accent VARCHAR(255) DEFAULT 'Blue'
-            )").execute(&mut connection).await.unwrap();
+            )").execute(connection).await.unwrap();
 
             connection.begin_test_transaction().await.unwrap();
             diesel::sql_query("INSERT INTO users (name) VALUES ('Sean'), ('Tess')").execute(&mut connection).await.unwrap();
             diesel::sql_query("INSERT INTO posts (user_id, title) VALUES
                 (1, 'My first post'),
                 (1, 'About Rust'),
-                (2, 'My first post too')").execute(&mut connection).await.unwrap();
+                (2, 'My first post too')").execute(connection).await.unwrap();
             diesel::sql_query("INSERT INTO comments (post_id, body) VALUES
                 (1, 'Great post'),
                 (2, 'Yay! I am learning Rust'),
-                (3, 'I enjoyed your post')").execute(&mut connection).await.unwrap();
+                (3, 'I enjoyed your post')").execute(connection).await.unwrap();
             diesel::sql_query("INSERT INTO animals (species, legs, name) VALUES
                                ('dog', 4, 'Jack'),
-                               ('spider', 8, null)").execute(&mut connection).await.unwrap();
+                               ('spider', 8, null)").execute(connection).await.unwrap();
+
+        }
+
+        #[allow(dead_code)]
+        async fn establish_connection() -> AsyncMysqlConnection {
+            let mut connection = connection_no_data().await;
+            create_tables(&mut connection).await;
 
 
             connection
