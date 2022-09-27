@@ -27,7 +27,6 @@ cfg_if::cfg_if! {
         }
 
         async fn create_tables(connection: &mut AsyncPgConnection) {
-
             diesel::sql_query("CREATE TABLE users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR NOT NULL
@@ -138,7 +137,7 @@ cfg_if::cfg_if! {
             )").execute(connection).await.unwrap();
 
             connection.begin_test_transaction().await.unwrap();
-            diesel::sql_query("INSERT INTO users (name) VALUES ('Sean'), ('Tess')").execute(&mut connection).await.unwrap();
+            diesel::sql_query("INSERT INTO users (name) VALUES ('Sean'), ('Tess')").execute(connection).await.unwrap();
             diesel::sql_query("INSERT INTO posts (user_id, title) VALUES
                 (1, 'My first post'),
                 (1, 'About Rust'),
