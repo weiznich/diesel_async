@@ -4,8 +4,12 @@ version = "0.1.0"
 authors = ["Georg Semmler <github@weiznich.de>"]
 edition = "2018"
 autotests = false
-license = "AGPL-v3"
-
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+repository = "https://github.com/weiznich/diesel_async"
+keywords = ["orm", "database", "sql"]
+categories = ["database"]
+description = "An async extension for Diesel the safe, extensible ORM and Query Builder"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
