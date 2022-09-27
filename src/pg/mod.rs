@@ -1,3 +1,9 @@
+//! Provides types and functions related to working with PostgreSQL
+//!
+//! Much of this module is re-exported from database agnostic locations.
+//! However, if you are writing code specifically to extend Diesel on
+//! PostgreSQL, you may need to work with this module directly.
+
 use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;

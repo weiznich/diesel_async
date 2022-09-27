@@ -49,7 +49,7 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// Executes the given function inside of a database transaction
     ///
     /// Each implementation of this function needs to fulfill the documented
-    /// behaviour of [`Connection::transaction`]
+    /// behaviour of [`AsyncConnection::transaction`]
     async fn transaction<F, R, E>(conn: &mut Conn, callback: F) -> Result<R, E>
     where
         F: FnOnce(&mut Conn) -> BoxFuture<Result<R, E>> + Send,

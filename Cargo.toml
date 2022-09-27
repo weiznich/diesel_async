@@ -28,7 +28,7 @@ chrono = "0.4"
 diesel = { version = "2.0.0-rc.1", default-features = false,  features = ["chrono"]}
 
 [features]
-default = ["postgres", "mysql", "deadpool", "bb8", "mobc"]
+default = []
 mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common"]
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt-multi-thread"]
 
@@ -36,3 +36,9 @@ postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt-mult
 name = "integration_tests"
 path = "tests/lib.rs"
 harness = true
+
+[package.metadata.docs.rs]
+features = ["postgres", "mysql", "deadpool", "bb8", "mobc"]
+no-default-features = true
+rustc-args = ["--cfg", "doc_cfg"]
+rustdoc-args = ["--cfg", "doc_cfg"]

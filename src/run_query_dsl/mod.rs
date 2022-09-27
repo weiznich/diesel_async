@@ -171,7 +171,8 @@ pub mod return_futures {
     use diesel::QueryResult;
     use std::pin::Pin;
 
-    /// The future returned by [`RunQueryDsl::load`] and [`RunQueryDsl::get_results`]
+    /// The future returned by [`RunQueryDsl::load`](super::RunQueryDsl::load)
+    /// and [`RunQueryDsl::get_results`](super::RunQueryDsl::get_results)
     ///
     /// This is essentially `impl Future<Output = QueryResult<Vec<U>>>`
     pub type LoadFuture<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
@@ -188,7 +189,7 @@ pub mod return_futures {
         >,
     >;
 
-    /// The future returned by [`RunQueryDsl::get_results`]
+    /// The future returned by [`RunQueryDsl::get_result`](super::RunQueryDsl::get_result)
     ///
     /// This is essentially `impl Future<Output = QueryResult<U>>`
     pub type GetResult<'conn, 'query, Q, Conn, U> = futures::future::AndThen<
@@ -223,7 +224,7 @@ pub mod return_futures {
         >,
     >;
 
-    /// The future returned by [`RunQueryDsl::execute`]
+    /// The future returned by [`RunQueryDsl::execute`](super::RunQueryDsl::execute)
     ///
     /// This is essentially `impl Future<Output = QueryResult<usize>>`
     pub type Execute<'conn, 'query, Conn> = <Conn as AsyncConnectionGatWorkaround<

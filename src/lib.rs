@@ -1,3 +1,4 @@
+#![cfg_attr(doc_cfg, feature(doc_cfg, doc_auto_cfg))]
 //! Diesel-async provides async variants of diesel releated query functionality
 //!
 //! diesel-async is an extension to diesel itself. It is designed to be used togehter
@@ -71,7 +72,7 @@ use futures::{Future, Stream};
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
-mod pg;
+pub mod pg;
 #[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
 pub mod pooled_connection;
 mod run_query_dsl;
@@ -79,12 +80,16 @@ mod stmt_cache;
 mod transaction_manager;
 
 #[cfg(feature = "mysql")]
+#[doc(inline)]
 pub use self::mysql::AsyncMysqlConnection;
 #[cfg(feature = "postgres")]
+#[doc(inline)]
 pub use self::pg::AsyncPgConnection;
+#[doc(inline)]
 pub use self::run_query_dsl::*;
 
-use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
+#[doc(inline)]
+pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 
 /// Perform simple operations on a backend.
 ///
@@ -147,7 +152,7 @@ where
     /// If the transaction fails to commit due to a `SerializationFailure` or a
     /// `ReadOnlyTransaction` a rollback will be attempted.
     /// If the rollback fails, the error will be returned in a
-    /// [`Error::RollbackErrorOnCommit`](crate::result::Error::RollbackErrorOnCommit),
+    /// [`Error::RollbackErrorOnCommit`](diesel::result::Error::RollbackErrorOnCommit),
     /// from which you will be able to extract both the original commit error and
     /// the rollback error.
     /// In addition, the connection will be considered broken
