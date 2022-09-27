@@ -1,9 +1,9 @@
+use crate::{AnsiTransactionManager, AsyncConnection, TransactionManager};
 use diesel::backend::Backend;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, QueryBuilder, QueryFragment};
 use diesel::QueryResult;
 use futures::future::BoxFuture;
-use crate::{AnsiTransactionManager, AsyncConnection, TransactionManager};
 
 /// Used to build a transaction, specifying additional details.
 ///
