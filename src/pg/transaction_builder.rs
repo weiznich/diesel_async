@@ -1,11 +1,21 @@
+use crate::{AnsiTransactionManager, AsyncConnection, TransactionManager};
 use diesel::backend::Backend;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, QueryBuilder, QueryFragment};
 use diesel::QueryResult;
 use futures::future::BoxFuture;
 
-use crate::{AnsiTransactionManager, AsyncConnection, TransactionManager};
-
+/// Used to build a transaction, specifying additional details.
+///
+/// This struct is returned by [`AsyncPgConnection::build_transaction`].
+/// See the documentation for methods on this struct for usage examples.
+/// See [the PostgreSQL documentation for `SET TRANSACTION`][pg-docs]
+/// for details on the behavior of each option.
+///
+/// [`AsyncPgConnection::build_transaction`]: super::AsyncPgConnection::build_transaction()
+/// [pg-docs]: https://www.postgresql.org/docs/current/static/sql-set-transaction.html
+#[must_use = "Transaction builder does nothing unless you call `run` on it"]
+#[cfg(feature = "postgres")]
 pub struct TransactionBuilder<'a, C> {
     connection: &'a mut C,
     isolation_level: Option<IsolationLevel>,

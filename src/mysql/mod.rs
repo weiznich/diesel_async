@@ -45,6 +45,14 @@ impl<'conn, 'query> AsyncConnectionGatWorkaround<'conn, 'query, Mysql> for Async
     type Row = MysqlRow;
 }
 
+const CONNECTION_SETUP_QUERIES: &'static [&'static str] = &[
+    "SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT'))",
+    "SET time_zone = '+00:00';",
+    "SET character_set_client = 'utf8mb4'",
+    "SET character_set_connection = 'utf8mb4'",
+    "SET character_set_results = 'utf8mb4'",
+];
+
 #[async_trait::async_trait]
 impl AsyncConnection for AsyncMysqlConnection {
     type Backend = Mysql;
@@ -55,13 +63,7 @@ impl AsyncConnection for AsyncMysqlConnection {
         let opts = Opts::from_url(database_url)
             .map_err(|e| diesel::result::ConnectionError::InvalidConnectionUrl(e.to_string()))?;
         let builder = OptsBuilder::from_opts(opts)
-            .init(vec![
-                "SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT'))",
-                "SET time_zone = '+00:00';",
-                "SET character_set_client = 'utf8mb4'",
-                "SET character_set_connection = 'utf8mb4'",
-                "SET character_set_results = 'utf8mb4'",
-            ])
+            .init(CONNECTION_SETUP_QUERIES.to_vec())
             .stmt_cache_size(0); // We have our own cache
 
         let conn = mysql_async::Conn::new(builder).await.map_err(ErrorHelper)?;
@@ -86,7 +88,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             + 'query,
     {
         self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
-            let res = conn.exec_iter(&*stmt, binds).await.map_err(ErrorHelper)?;
+            let res = conn.exec_iter(stmt, binds).await.map_err(ErrorHelper)?;
 
             let stream = res
                 .stream_and_drop::<MysqlRow>()
@@ -116,7 +118,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             + 'query,
     {
         self.with_prepared_statement(source, |conn, stmt, binds| async move {
-            conn.exec_drop(&*stmt, binds).await.map_err(ErrorHelper)?;
+            conn.exec_drop(stmt, binds).await.map_err(ErrorHelper)?;
             Ok(conn.affected_rows() as usize)
         })
     }
@@ -124,6 +126,23 @@ impl AsyncConnection for AsyncMysqlConnection {
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
         &mut self.transaction_manager
     }
+}
+
+#[inline(always)]
+fn update_transaction_manager_status<T>(
+    query_result: QueryResult<T>,
+    transaction_manager: &mut AnsiTransactionManager,
+) -> QueryResult<T> {
+    if let Err(diesel::result::Error::DatabaseError(
+        diesel::result::DatabaseErrorKind::SerializationFailure,
+        _,
+    )) = query_result
+    {
+        transaction_manager
+            .status
+            .set_top_level_transaction_requires_rollback()
+    }
+    query_result
 }
 
 #[async_trait::async_trait]
@@ -152,16 +171,9 @@ impl AsyncMysqlConnection {
             transaction_manager: AnsiTransactionManager::default(),
             last_stmt: None,
         };
-        let setup_statements = vec![
-            "SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT'))",
-            "SET time_zone = '+00:00';",
-            "SET character_set_client = 'utf8mb4'",
-            "SET character_set_connection = 'utf8mb4'",
-            "SET character_set_results = 'utf8mb4'",
-        ];
 
-        for stmt in setup_statements {
-            diesel::sql_query(stmt)
+        for stmt in CONNECTION_SETUP_QUERIES {
+            diesel::sql_query(*stmt)
                 .execute(&mut conn)
                 .await
                 .map_err(ConnectionError::CouldntSetupConfiguration)?;
@@ -194,6 +206,7 @@ impl AsyncMysqlConnection {
             ref mut conn,
             ref mut stmt_cache,
             ref mut last_stmt,
+            ref mut transaction_manager,
             ..
         } = self;
 
@@ -209,7 +222,7 @@ impl AsyncMysqlConnection {
                 MaybeCached::Cached(s) => s,
                 _ => unreachable!("We've opted into breaking diesel changes and want to know if things break because someone added a new variant here")
             };
-            callback(conn, stmt, ToSqlHelper{metadata, binds}).await
+            update_transaction_manager_status(callback(conn, stmt, ToSqlHelper{metadata, binds}).await, transaction_manager)
         }).boxed()
     }
 }

@@ -173,8 +173,10 @@ where
         TM::commit_transaction(&mut **conn).await
     }
 
-    fn get_transaction_depth(conn: &mut C) -> u32 {
-        TM::get_transaction_depth(&mut **conn)
+    fn transaction_manager_status_mut(
+        conn: &mut C,
+    ) -> &mut crate::transaction_manager::TransactionManagerStatus {
+        TM::transaction_manager_status_mut(&mut **conn)
     }
 }
 
