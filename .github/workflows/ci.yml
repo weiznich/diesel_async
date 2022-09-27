@@ -68,9 +68,10 @@ jobs:
       - name: Install postgres (MacOS)
         if: runner.os == 'macOS' && matrix.backend == 'postgres'
         run: |
-          /usr/local/opt/postgres/bin/pg_ctl -D /usr/local/var/postgres start
+          initdb -D /usr/local/var/postgres
+          pg_ctl -D /usr/local/var/postgres start
           sleep 3
-          /usr/local/opt/postgres/bin/createuser -s postgres
+          createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS)
@@ -106,33 +107,23 @@ jobs:
           echo "DATABASE_URL=mysql://root@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: ${{ matrix.rust }}
-          override: true
       - name: Rust version check
-        uses: actions-rs/cargo@v1
-        with:
-          command: version
+        run: cargo +${{ matrix.rust }} version
 
       - name: Test diesel_async
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }}"
+        run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc"
 
   rustfmt_and_clippy:
     name: Check rustfmt style && run clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
           components: clippy, rustfmt
-          override: true
       - name: Cache cargo registry
         uses: actions/cache@v2
         with:
@@ -148,13 +139,7 @@ jobs:
           find ~/.cargo/registry -iname "*clippy.toml" -delete
 
       - name: Run clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all
+        run: cargo +stable clippy --all
 
       - name: Check formating
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo +stable fmt --all -- --check

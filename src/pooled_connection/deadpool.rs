@@ -31,6 +31,10 @@
 //! #     let config = get_config();
 //!   let pool = Pool::builder(config).build()?;
 //!   let mut conn = pool.get().await?;
+//! # conn.begin_test_transaction();
+//! # clear_tables(&mut conn).await;
+//! # create_tables(&mut conn).await;
+//! # conn.begin_test_transaction();
 //!   let res = users.load::<(i32, String)>(&mut conn).await?;
 //! #     Ok(())
 //! # }
