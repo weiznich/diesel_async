@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "diesel-async"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bb8",
@@ -369,6 +369,8 @@ dependencies = [
  "mobc",
  "mysql_async",
  "mysql_common",
+ "native-tls",
+ "postgres-native-tls",
  "tokio",
  "tokio-postgres",
 ]
@@ -1224,6 +1226,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
 
 [[package]]
+name = "postgres-native-tls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d442770e2b1e244bb5eb03b31c79b65bb2568f413b899eaba850fa945a65954"
+dependencies = [
+ "futures",
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1662,7 +1677,19 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "socket2",
+ "tokio-macros",
  "winapi",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9724f9a975fb987ef7a3cd9be0350edcbe130698af5b8f7a631e23d42d052484"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

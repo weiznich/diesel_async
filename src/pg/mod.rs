@@ -22,6 +22,8 @@ use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use futures::stream::{BoxStream, TryStreamExt};
 use futures::{Future, FutureExt, StreamExt};
+use native_tls::TlsConnector;
+use postgres_native_tls::MakeTlsConnector;
 use std::borrow::Cow;
 use std::sync::Arc;
 use tokio_postgres::types::ToSql;
@@ -126,7 +128,14 @@ impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
-        let (client, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls)
+        let connector = TlsConnector::builder().build().map_err(|err| {
+            diesel::result::ConnectionError::BadConnection(format!(
+                "Failed to build TlsConnector.: {}",
+                err
+            ))
+        })?;
+        let connector = MakeTlsConnector::new(connector);
+        let (client, connection) = tokio_postgres::connect(database_url, connector)
             .await
             .map_err(ErrorHelper)?;
         tokio::spawn(async move {
