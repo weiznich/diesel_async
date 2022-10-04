@@ -22,11 +22,15 @@ use self::row::MysqlRow;
 use self::serialize::ToSqlHelper;
 
 /// A connection to a MySQL database. Connection URLs should be in the form
-/// `mysql://[user[:password]@]host/database_name`
+/// `mysql://[user[:password]@]host/database_name`.
+///
+/// See [`mysql_async::Opts`] for more available connection url queries. Notice that
+/// param `stmt_cache_size` will be ignored.
 pub struct AsyncMysqlConnection {
     conn: mysql_async::Conn,
     stmt_cache: StmtCache<Mysql, Statement>,
     transaction_manager: AnsiTransactionManager,
+    // a workaround so that for non-cacheable stmts we still get a `&'conn Statement`.
     last_stmt: Option<Statement>,
 }
 
@@ -212,11 +216,14 @@ impl AsyncMysqlConnection {
 
         let stmt = stmt_cache.cached_prepared_statement(query, &metadata, conn, &Mysql);
 
-        stmt.and_then(|(stmt, conn)|async  move {
-
+        stmt.and_then(|(stmt, conn)| async move {
             let stmt = match stmt {
                 MaybeCached::CannotCache(stmt) => {
+                    if let Some(last_stmt) = std::mem::take(last_stmt) {
+                        conn.close(last_stmt).await.map_err(ErrorHelper)?;
+                    }
                     *last_stmt = Some(stmt);
+                    // SAFETY: we just set last_stmt to Some.
                     last_stmt.as_ref().unwrap()
                 }
                 MaybeCached::Cached(s) => s,
