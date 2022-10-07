@@ -47,7 +47,7 @@ pub type Pool<C> = deadpool::managed::Pool<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::PoolBuilder`] with [`diesel-async`]
 pub type PoolBuilder<C> = deadpool::managed::PoolBuilder<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::BuildError`] with [`diesel-async`]
-pub type BuildError = deadpool::managed::BuildError<PoolError>;
+pub type BuildError = deadpool::managed::BuildError<super::PoolError>;
 /// Type alias for using [`deadpool::managed::PoolError`] with [`diesel-async`]
 pub type PoolError = deadpool::managed::PoolError<super::PoolError>;
 /// Type alias for using [`deadpool::managed::Object`] with [`diesel-async`]
