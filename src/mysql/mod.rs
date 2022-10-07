@@ -27,7 +27,6 @@ pub struct AsyncMysqlConnection {
     conn: mysql_async::Conn,
     stmt_cache: StmtCache<Mysql, Statement>,
     transaction_manager: AnsiTransactionManager,
-    last_stmt: Option<Statement>,
 }
 
 #[async_trait::async_trait]
@@ -72,7 +71,6 @@ impl AsyncConnection for AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
-            last_stmt: None,
         })
     }
 
@@ -88,19 +86,44 @@ impl AsyncConnection for AsyncMysqlConnection {
             + 'query,
     {
         self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
-            let res = conn.exec_iter(stmt, binds).await.map_err(ErrorHelper)?;
+            let stmt_for_exec = match stmt {
+                MaybeCached::Cached(ref s) => (*s).clone(),
+                MaybeCached::CannotCache(ref s) => s.clone(),
+                _ => todo!(),
+            };
 
-            let stream = res
-                .stream_and_drop::<MysqlRow>()
-                .await
-                .map_err(ErrorHelper)?
-                .ok_or_else(|| {
-                    diesel::result::Error::DeserializationError(Box::new(
-                        diesel::result::UnexpectedEndOfRow,
-                    ))
-                })?
-                .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
-                .boxed();
+            let (tx, rx) = futures::channel::mpsc::channel(0);
+
+            let yielder = async move {
+                let r = Self::poll_result_stream(conn, stmt_for_exec, binds, tx).await;
+                // We need to close any non-cached statement explicitly here as otherwise
+                // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
+                // for details
+                //
+                // This might be problematic for cases where the stream is droped before the end is reached
+                //
+                // Such behaviour might happen if users:
+                // * Just drop the future/stream after polling at least once (timeouts!!)
+                // * Users only fetch a fixed number of elements from the stream
+                //
+                // For now there is not really a good solution to this problem as this would require something like async drop
+                // (and even with async drop that would be really hard to solve due to the involved lifetimes)
+                if let MaybeCached::CannotCache(stmt) = stmt {
+                    conn.close(stmt).await.map_err(ErrorHelper)?;
+                }
+                r
+            };
+
+            let fake_stream =
+                futures::stream::once(yielder).filter_map(|e: QueryResult<()>| async move {
+                    if let Err(e) = e {
+                        Some(Err(e))
+                    } else {
+                        None
+                    }
+                });
+
+            let stream = futures::stream::select(fake_stream, rx).boxed();
 
             Ok(stream)
         })
@@ -118,7 +141,21 @@ impl AsyncConnection for AsyncMysqlConnection {
             + 'query,
     {
         self.with_prepared_statement(source, |conn, stmt, binds| async move {
-            conn.exec_drop(stmt, binds).await.map_err(ErrorHelper)?;
+            conn.exec_drop(&*stmt, binds).await.map_err(ErrorHelper)?;
+            // We need to close any non-cached statement explicitly here as otherwise
+            // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
+            // for details
+            //
+            // This might be problematic for cases where the stream is droped before the end is reached
+            //
+            // Such behaviour might happen if users:
+            // * Just drop the future after polling at least once (timeouts!!)
+            //
+            // For now there is not really a good solution to this problem as this would require something like async drop
+            // (and even with async drop that would be really hard to solve due to the involved lifetimes)
+            if let MaybeCached::CannotCache(stmt) = stmt {
+                conn.close(stmt).await.map_err(ErrorHelper)?;
+            }
             Ok(conn.affected_rows() as usize)
         })
     }
@@ -169,7 +206,6 @@ impl AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
-            last_stmt: None,
         };
 
         for stmt in CONNECTION_SETUP_QUERIES {
@@ -185,7 +221,7 @@ impl AsyncMysqlConnection {
     fn with_prepared_statement<'conn, T, F, R>(
         &'conn mut self,
         query: T,
-        callback: impl (FnOnce(&'conn mut mysql_async::Conn, &'conn Statement, ToSqlHelper) -> F)
+        callback: impl (FnOnce(&'conn mut mysql_async::Conn, MaybeCached<'conn, Statement>, ToSqlHelper) -> F)
             + Send
             + 'conn,
     ) -> BoxFuture<'conn, QueryResult<R>>
@@ -205,27 +241,98 @@ impl AsyncMysqlConnection {
         let AsyncMysqlConnection {
             ref mut conn,
             ref mut stmt_cache,
-            ref mut last_stmt,
             ref mut transaction_manager,
             ..
         } = self;
 
         let stmt = stmt_cache.cached_prepared_statement(query, &metadata, conn, &Mysql);
 
-        stmt.and_then(|(stmt, conn)|async  move {
+        stmt.and_then(|(stmt, conn)| async move {
+            let res = update_transaction_manager_status(
+                callback(conn, stmt, ToSqlHelper { metadata, binds }).await,
+                transaction_manager,
+            );
+            res
+        })
+        .boxed()
+    }
 
-            let stmt = match stmt {
-                MaybeCached::CannotCache(stmt) => {
-                    *last_stmt = Some(stmt);
-                    last_stmt.as_ref().unwrap()
-                }
-                MaybeCached::Cached(s) => s,
-                _ => unreachable!("We've opted into breaking diesel changes and want to know if things break because someone added a new variant here")
-            };
-            update_transaction_manager_status(callback(conn, stmt, ToSqlHelper{metadata, binds}).await, transaction_manager)
-        }).boxed()
+    async fn poll_result_stream(
+        conn: &mut mysql_async::Conn,
+        stmt_for_exec: mysql_async::Statement,
+        binds: ToSqlHelper,
+        mut tx: futures::channel::mpsc::Sender<QueryResult<MysqlRow>>,
+    ) -> QueryResult<()> {
+        use futures::SinkExt;
+        let res = conn
+            .exec_iter(stmt_for_exec, binds)
+            .await
+            .map_err(ErrorHelper)?;
+
+        let mut stream = res
+            .stream_and_drop::<MysqlRow>()
+            .await
+            .map_err(ErrorHelper)?
+            .ok_or_else(|| {
+                diesel::result::Error::DeserializationError(Box::new(
+                    diesel::result::UnexpectedEndOfRow,
+                ))
+            })?
+            .map_err(|e| diesel::result::Error::from(ErrorHelper(e)));
+
+        while let Some(row) = stream.next().await {
+            let row = row?;
+            tx.send(Ok(row))
+                .await
+                .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))?;
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
 impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {}
+
+#[cfg(test)]
+mod tests {
+    use crate::RunQueryDsl;
+    mod diesel_async {
+        pub use crate::*;
+    }
+    include!("../doctest_setup.rs");
+
+    #[tokio::test]
+    async fn check_statements_are_dropped() {
+        use self::schema::users;
+
+        let mut conn = establish_connection().await;
+        // we cannot set a lower limit here without admin privileges
+        // which makes this test really slow
+        let stmt_count = 16382 + 10;
+
+        for i in 0..stmt_count {
+            diesel::insert_into(users::table)
+                .values(Some(users::name.eq(format!("User{i}"))))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+
+        #[derive(QueryableByName)]
+        #[diesel(table_name = users)]
+        #[allow(dead_code)]
+        struct User {
+            id: i32,
+            name: String,
+        }
+
+        for i in 0..stmt_count {
+            diesel::sql_query("SELECT id, name FROM users WHERE name = ?")
+                .bind::<diesel::sql_types::Text, _>(format!("User{i}"))
+                .load::<User>(&mut conn)
+                .await
+                .unwrap();
+        }
+    }
+}
