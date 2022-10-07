@@ -106,31 +106,31 @@ cfg_if::cfg_if! {
         }
 
         async fn create_tables(connection: &mut AsyncMysqlConnection) {
-               diesel::sql_query("CREATE TABLE IF NOT EXISTS users (
+               diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 name TEXT NOT NULL
             ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
 
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS animals (
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS animals (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 species TEXT NOT NULL,
                 legs INTEGER NOT NULL,
                 name TEXT
             ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS posts (
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL
             ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS comments (
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS comments (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 post_id INTEGER NOT NULL,
                 body TEXT NOT NULL
             ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS brands (
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS brands (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 color VARCHAR(255) NOT NULL DEFAULT 'Green',
                 accent VARCHAR(255) DEFAULT 'Blue'
