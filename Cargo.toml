@@ -34,7 +34,7 @@ diesel = { version = "2.0.0", default-features = false,  features = ["chrono"]}
 [features]
 default = []
 mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common"]
-postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio"]
+postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
 
 [[test]]
 name = "integration_tests"
