@@ -70,8 +70,8 @@ use diesel::backend::Backend;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
-use futures::future::BoxFuture;
 use futures::{Future, Stream};
+use scoped_futures::ScopedBoxFuture;
 
 #[cfg(feature = "mysql")]
 mod mysql;
@@ -221,11 +221,11 @@ where
     /// #     Ok(())
     /// # }
     /// ```
-    async fn transaction<R, E, F>(&mut self, callback: F) -> Result<R, E>
+    async fn transaction<'a, R, E, F>(&mut self, callback: F) -> Result<R, E>
     where
-        F: FnOnce(&mut Self) -> BoxFuture<Result<R, E>> + Send,
-        E: From<diesel::result::Error> + Send,
-        R: Send,
+        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        E: From<diesel::result::Error> + Send + 'a,
+        R: Send + 'a,
     {
         Self::TransactionManager::transaction(self, callback).await
     }
