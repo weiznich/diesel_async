@@ -1,6 +1,6 @@
 use diesel::result::Error;
 use diesel::QueryResult;
-use scoped_futures::ScopedFuture;
+use scoped_futures::ScopedBoxFuture;
 use std::borrow::Cow;
 use std::num::NonZeroU32;
 
