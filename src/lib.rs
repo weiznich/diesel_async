@@ -26,6 +26,9 @@
 //! ```rust
 //! # include!("./doctest_setup.rs");
 //! #
+//! use diesel::prelude::*;
+//! use diesel_async::{RunQueryDsl, AsyncConnection};
+//!
 //! diesel::table! {
 //!    users(id) {
 //!        id -> Integer,
@@ -39,8 +42,9 @@
 //! # }
 //! #
 //! # async fn run_test() -> QueryResult<()> {
-//! #     use diesel::insert_into;
+//!
 //! use crate::users::dsl::*;
+//!
 //! # let mut connection = establish_connection().await;
 //! # /*
 //! let mut connection = AsyncPgConnection::establish(std::env::var("DATABASE_URL")?).await?;
@@ -49,7 +53,7 @@
 //!     // use ordinary diesel query dsl here
 //!     .filter(id.gt(0))
 //!     // execute the query via the provided
-//!     // async variant of `RunQueryDsl`
+//!     // async variant of `diesel_async::RunQueryDsl`
 //!     .load::<(i32, String)>(&mut connection)
 //!     .await?;
 //! let expected_data = vec![
