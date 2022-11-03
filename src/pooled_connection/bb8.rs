@@ -47,6 +47,10 @@ use bb8::ManageConnection;
 
 /// Type alias for using [`bb8::Pool`] with [`diesel-async`]
 pub type Pool<C> = bb8::Pool<AsyncDieselConnectionManager<C>>;
+/// Type alias for using [`bb8::PooledConnection`] with [`diesel-async`]
+pub type PooledConnection<'a, C> = bb8::PooledConnection<'a, AsyncDieselConnectionManager<C>>;
+/// Type alias for using [`bb8::RunError`] with [`diesel-async`]
+pub type RunError = bb8::RunError<super::PoolError>;
 
 #[async_trait::async_trait]
 impl<C> ManageConnection for AsyncDieselConnectionManager<C>
