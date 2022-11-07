@@ -1,4 +1,4 @@
-//! A pool implementation for `diesel-async` based on [`bb8`]
+//! A pool implementation for `diesel-async` based on [`mobc`]
 //!
 //! ```rust
 //! # include!("../doctest_setup.rs");
