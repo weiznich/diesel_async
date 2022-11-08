@@ -1,9 +1,8 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
-use futures::FutureExt;
+use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
-use std::pin::Pin;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
@@ -12,7 +11,7 @@ mod type_check;
 async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
     let res = conn
         .transaction::<i32, diesel::result::Error, _>(|conn| {
-            Box::pin(async move {
+            async move {
                 let users: Vec<User> = users::table.load(conn).await?;
                 assert_eq!(&users[0].name, "John Doe");
                 assert_eq!(&users[1].name, "Jane Doe");
@@ -31,7 +30,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                             assert_eq!(count, 3);
                             Ok(())
                         }
-                        .boxed()
+                        .scope_boxed()
                     })
                     .await;
                 assert!(res.is_ok());
@@ -48,7 +47,8 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                 assert_eq!(count, 4);
 
                 Err(diesel::result::Error::RollbackTransaction)
-            }) as Pin<Box<_>>
+            }
+            .scope_boxed()
         })
         .await;
     assert_eq!(
