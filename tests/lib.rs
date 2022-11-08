@@ -1,8 +1,9 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
-use futures::FutureExt;
+use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
+use std::pin::Pin;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
@@ -30,7 +31,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                             assert_eq!(count, 3);
                             Ok(())
                         }
-                        .boxed().into()
+                        .scope_boxed()
                     })
                     .await;
                 assert!(res.is_ok());
@@ -47,7 +48,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                 assert_eq!(count, 4);
 
                 Err(diesel::result::Error::RollbackTransaction)
-            }).into()
+            }) as Pin<Box<_>>
         })
         .await;
     assert_eq!(

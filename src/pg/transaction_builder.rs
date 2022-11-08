@@ -77,7 +77,7 @@ where
     ///         assert!(write_attempt.is_err());
     ///
     ///         Ok(())
-    ///     }).into()).await?;
+    ///     }) as _).await?;
     /// #     sql_query("DROP TABLE users_for_read_only").execute(conn).await?;
     /// #     Ok(())
     /// # }
@@ -127,7 +127,7 @@ where
     /// #       /*
     ///         Ok(())
     /// #       */
-    ///     }).into())
+    ///     }) as _)
     ///     .await
     /// # }
     /// ```
@@ -153,7 +153,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .deferrable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }).into())
+    ///     .run(|conn| Box::pin(async { Ok(()) }))
     ///     .await
     /// # }
     /// ```
@@ -182,7 +182,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .not_deferrable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }).into())
+    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
     ///     .await
     /// # }
     /// ```
@@ -211,7 +211,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .read_committed()
-    ///     .run(|conn| Box::pin(async { Ok(()) }).into())
+    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
     ///     .await
     /// # }
     /// ```
@@ -237,7 +237,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .repeatable_read()
-    ///     .run(|conn| Box::pin(async { Ok(()) }).into())
+    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
     ///     .await
     /// # }
     /// ```
@@ -263,7 +263,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .serializable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }).into())
+    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
     ///     .await
     /// # }
     /// ```
