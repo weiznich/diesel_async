@@ -271,7 +271,7 @@ impl AsyncPgConnection {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
-    /// # use futures::FutureExt;
+    /// # use scoped_futures::ScopedFutureExt;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -285,7 +285,7 @@ impl AsyncPgConnection {
     ///     .read_only()
     ///     .serializable()
     ///     .deferrable()
-    ///     .run(|conn| async move { Ok(()) }.boxed())
+    ///     .run(|conn| async move { Ok(()) }.scope_boxed())
     ///     .await
     /// # }
     /// ```
