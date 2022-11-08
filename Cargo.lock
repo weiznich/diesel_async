@@ -1426,7 +1426,7 @@ dependencies = [
 [[package]]
 name = "scoped-futures"
 version = "0.1.0"
-source = "git+https://github.com/sidechainme/scoped-futures?rev=362cd58#362cd587e6cb7f062a066e96231e22b137197d39"
+source = "git+https://github.com/sidechainme/scoped-futures?rev=9ca1007#9ca1007b872e37b0284a4b70535c05dd041ac49d"
 dependencies = [
  "futures",
  "pin-utils",
