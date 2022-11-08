@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "diesel-async"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bb8",
@@ -1426,7 +1426,8 @@ dependencies = [
 [[package]]
 name = "scoped-futures"
 version = "0.1.0"
-source = "git+https://github.com/sidechainme/scoped-futures?rev=9ca1007#9ca1007b872e37b0284a4b70535c05dd041ac49d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7671272a2eed29c6e2feb278daecf4222268763e4582f7fc22e17c05b749cc8f"
 dependencies = [
  "futures",
  "pin-utils",
