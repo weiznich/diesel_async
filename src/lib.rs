@@ -72,7 +72,8 @@ use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures::{Future, Stream};
 
-pub use scoped_futures::*;
+pub use scoped_futures;
+use scoped_futures::*;
 
 #[cfg(feature = "mysql")]
 mod mysql;
