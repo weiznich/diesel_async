@@ -1,7 +1,7 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
-use futures::FutureExt;
+use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
 use std::pin::Pin;
 
@@ -31,7 +31,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
                             assert_eq!(count, 3);
                             Ok(())
                         }
-                        .boxed()
+                        .scope_boxed()
                     })
                     .await;
                 assert!(res.is_ok());

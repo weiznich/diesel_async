@@ -1,6 +1,6 @@
 use diesel::result::Error;
 use diesel::QueryResult;
-use futures::future::BoxFuture;
+use scoped_futures::ScopedBoxFuture;
 use std::borrow::Cow;
 use std::num::NonZeroU32;
 
@@ -50,9 +50,9 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     ///
     /// Each implementation of this function needs to fulfill the documented
     /// behaviour of [`AsyncConnection::transaction`]
-    async fn transaction<F, R, E>(conn: &mut Conn, callback: F) -> Result<R, E>
+    async fn transaction<'a, F, R, E>(conn: &mut Conn, callback: F) -> Result<R, E>
     where
-        F: FnOnce(&mut Conn) -> BoxFuture<Result<R, E>> + Send,
+        F: for<'r> FnOnce(&'r mut Conn) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
         E: From<Error> + Send,
         R: Send,
     {

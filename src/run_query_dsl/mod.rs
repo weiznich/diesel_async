@@ -96,7 +96,7 @@ pub mod methods {
         U: Send,
         T: AsQuery + Send,
         T::SqlType: CompatibleType<U, DB, SqlType = ST>,
-        U: FromSqlRow<ST, DB> + Send + 'static,
+        U: FromSqlRow<ST, DB> + Send,
         DB: QueryMetadata<T::SqlType>,
     {
         type LoadFuture = futures::future::MapOk<
@@ -115,13 +115,12 @@ pub mod methods {
     where
         Conn: AsyncConnection<Backend = DB>,
         U: Send,
-        DB: Backend + 'static,
+        DB: Backend,
         T: AsQuery + Send + 'query,
         T::Query: QueryFragment<DB> + QueryId + Send + 'query,
         T::SqlType: CompatibleType<U, DB, SqlType = ST>,
-        U: FromSqlRow<ST, DB> + Send + 'static,
+        U: FromSqlRow<ST, DB> + Send,
         DB: QueryMetadata<T::SqlType>,
-        ST: 'static,
     {
         fn internal_load<'conn>(
             self,
@@ -142,9 +141,8 @@ pub mod methods {
     where
         S: Stream<Item = QueryResult<R>> + Send + 's,
         R: diesel::row::Row<'a, DB> + 's,
-        DB: Backend + 'static,
-        U: FromSqlRow<ST, DB> + 'static,
-        ST: 'static,
+        DB: Backend,
+        U: FromSqlRow<ST, DB>,
     {
         stream.map(map_row_helper::<_, DB, U, ST>)
     }

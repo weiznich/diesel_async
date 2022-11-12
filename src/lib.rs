@@ -70,8 +70,10 @@ use diesel::backend::Backend;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
-use futures::future::BoxFuture;
 use futures::{Future, Stream};
+
+pub use scoped_futures;
+use scoped_futures::ScopedBoxFuture;
 
 #[cfg(feature = "mysql")]
 mod mysql;
@@ -180,7 +182,7 @@ where
     /// ```rust
     /// # include!("doctest_setup.rs");
     /// use diesel::result::Error;
-    /// use futures::FutureExt;
+    /// use scoped_futures::ScopedFutureExt;
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -200,7 +202,7 @@ where
     ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     ///
     ///     Ok(())
-    /// }.boxed()).await?;
+    /// }.scope_boxed()).await?;
     ///
     /// conn.transaction::<(), _, _>(|conn| async move {
     ///     diesel::insert_into(users)
@@ -214,18 +216,18 @@ where
     ///     // If we want to roll back the transaction, but don't have an
     ///     // actual error to return, we can return `RollbackTransaction`.
     ///     Err(Error::RollbackTransaction)
-    /// }.boxed()).await;
+    /// }.scope_boxed()).await;
     ///
     /// let all_names = users.select(name).load::<String>(conn).await?;
     /// assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     /// #     Ok(())
     /// # }
     /// ```
-    async fn transaction<R, E, F>(&mut self, callback: F) -> Result<R, E>
+    async fn transaction<'a, R, E, F>(&mut self, callback: F) -> Result<R, E>
     where
-        F: FnOnce(&mut Self) -> BoxFuture<Result<R, E>> + Send,
-        E: From<diesel::result::Error> + Send,
-        R: Send,
+        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        E: From<diesel::result::Error> + Send + 'a,
+        R: Send + 'a,
     {
         Self::TransactionManager::transaction(self, callback).await
     }
