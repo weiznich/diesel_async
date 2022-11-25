@@ -95,7 +95,9 @@ pub use self::pg::AsyncPgConnection;
 pub use self::run_query_dsl::*;
 
 #[doc(inline)]
-pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
+pub use self::transaction_manager::{
+    AnsiTransactionManager, TransactionManager, TransactionManagerStatus,
+};
 
 /// Perform simple operations on a backend.
 ///
