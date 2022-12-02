@@ -73,7 +73,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
             let metadata = metadata.to_vec();
             let f = async move {
                 let stmt = prepare_fn
-                    .prepare(&*sql, &metadata, PrepareForCache::No)
+                    .prepare(&sql, &metadata, PrepareForCache::No)
                     .await?;
                 Ok((MaybeCached::CannotCache(stmt.0), stmt.1))
             }
@@ -94,7 +94,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
                 let metadata = metadata.to_vec();
                 let f = async move {
                     let statement = prepare_fn
-                        .prepare(&*sql, &metadata, PrepareForCache::Yes)
+                        .prepare(&sql, &metadata, PrepareForCache::Yes)
                         .await?;
 
                     Ok((MaybeCached::Cached(entry.insert(statement.0)), statement.1))
