@@ -7,7 +7,7 @@
 //! * [mobc](self::mobc)
 
 use crate::TransactionManager;
-use crate::{AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection};
+use crate::{AsyncConnection, SimpleAsyncConnection};
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::DerefMut;
@@ -65,19 +65,6 @@ impl<C> AsyncDieselConnectionManager<C> {
     }
 }
 
-impl<'conn, 'query, C, DB> AsyncConnectionGatWorkaround<'conn, 'query, DB> for C
-where
-    DB: diesel::backend::Backend,
-    C: DerefMut,
-    C::Target: AsyncConnectionGatWorkaround<'conn, 'query, DB>,
-{
-    type ExecuteFuture =
-        <C::Target as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::ExecuteFuture;
-    type LoadFuture = <C::Target as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::LoadFuture;
-    type Stream = <C::Target as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::Stream;
-    type Row = <C::Target as AsyncConnectionGatWorkaround<'conn, 'query, DB>>::Row;
-}
-
 #[async_trait::async_trait]
 impl<C> SimpleAsyncConnection for C
 where
@@ -96,6 +83,16 @@ where
     C: DerefMut + Send,
     C::Target: AsyncConnection,
 {
+    type ExecuteFuture<'conn, 'query> =
+        <C::Target as AsyncConnection>::ExecuteFuture<'conn, 'query>
+        where C::Target: 'conn, C: 'conn;
+    type LoadFuture<'conn, 'query> = <C::Target as AsyncConnection>::LoadFuture<'conn, 'query>
+                where C::Target: 'conn, C: 'conn;
+    type Stream<'conn, 'query> = <C::Target as AsyncConnection>::Stream<'conn, 'query>
+                where C::Target: 'conn, C: 'conn;
+    type Row<'conn, 'query> = <C::Target as AsyncConnection>::Row<'conn, 'query>
+                where C::Target: 'conn, C: 'conn;
+
     type Backend = <C::Target as AsyncConnection>::Backend;
 
     type TransactionManager =
@@ -107,10 +104,7 @@ where
         ))
     }
 
-    fn load<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> <Self as crate::AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
         T: diesel::query_builder::AsQuery + Send + 'query,
         T::Query: diesel::query_builder::QueryFragment<Self::Backend>
@@ -125,7 +119,7 @@ where
     fn execute_returning_count<'conn, 'query, T>(
         &'conn mut self,
         source: T,
-    ) -> <Self as crate::AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
+    ) -> Self::ExecuteFuture<'conn, 'query>
     where
         T: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
@@ -208,7 +202,10 @@ pub trait PoolableConnection: AsyncConnection {
     /// Check if a connection is still valid
     ///
     /// The default implementation performs a `SELECT 1` query
-    async fn ping(&mut self) -> diesel::QueryResult<()> {
+    async fn ping(&mut self) -> diesel::QueryResult<()>
+    where
+        for<'a> Self: 'a,
+    {
         use crate::RunQueryDsl;
         CheckConnectionQuery.execute(self).await.map(|_| ())
     }

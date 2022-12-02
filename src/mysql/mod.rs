@@ -1,7 +1,5 @@
 use crate::stmt_cache::{PrepareCallback, StmtCache};
-use crate::{
-    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
-};
+use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::MaybeCached;
 use diesel::mysql::{Mysql, MysqlType};
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
@@ -36,16 +34,7 @@ impl SimpleAsyncConnection for AsyncMysqlConnection {
     }
 }
 
-impl<'conn, 'query> AsyncConnectionGatWorkaround<'conn, 'query, Mysql> for AsyncMysqlConnection {
-    type ExecuteFuture = BoxFuture<'conn, QueryResult<usize>>;
-    type LoadFuture = BoxFuture<'conn, QueryResult<Self::Stream>>;
-    type Stream = BoxStream<'conn, QueryResult<Self::Row>>;
-
-    type Row = MysqlRow;
-}
-
-const CONNECTION_SETUP_QUERIES: &'static [&'static str] = &[
-    "SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT'))",
+const CONNECTION_SETUP_QUERIES: &[&str] = &[
     "SET time_zone = '+00:00';",
     "SET character_set_client = 'utf8mb4'",
     "SET character_set_connection = 'utf8mb4'",
@@ -54,6 +43,10 @@ const CONNECTION_SETUP_QUERIES: &'static [&'static str] = &[
 
 #[async_trait::async_trait]
 impl AsyncConnection for AsyncMysqlConnection {
+    type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
+    type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
+    type Stream<'conn, 'query> = BoxStream<'conn, QueryResult<Self::Row<'conn, 'query>>>;
+    type Row<'conn, 'query> = MysqlRow;
     type Backend = Mysql;
 
     type TransactionManager = AnsiTransactionManager;
@@ -74,10 +67,7 @@ impl AsyncConnection for AsyncMysqlConnection {
         })
     }
 
-    fn load<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
         T: diesel::query_builder::AsQuery + Send,
         T::Query: diesel::query_builder::QueryFragment<Self::Backend>
@@ -133,7 +123,7 @@ impl AsyncConnection for AsyncMysqlConnection {
     fn execute_returning_count<'conn, 'query, T>(
         &'conn mut self,
         source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
+    ) -> Self::ExecuteFuture<'conn, 'query>
     where
         T: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
@@ -248,11 +238,10 @@ impl AsyncMysqlConnection {
         let stmt = stmt_cache.cached_prepared_statement(query, &metadata, conn, &Mysql);
 
         stmt.and_then(|(stmt, conn)| async move {
-            let res = update_transaction_manager_status(
+            update_transaction_manager_status(
                 callback(conn, stmt, ToSqlHelper { metadata, binds }).await,
                 transaction_manager,
-            );
-            res
+            )
         })
         .boxed()
     }

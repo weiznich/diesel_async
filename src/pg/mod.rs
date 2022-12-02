@@ -8,9 +8,7 @@ use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{PrepareCallback, StmtCache};
-use crate::{
-    AnsiTransactionManager, AsyncConnection, AsyncConnectionGatWorkaround, SimpleAsyncConnection,
-};
+use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::PrepareForCache;
 use diesel::pg::{
     FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata,
@@ -110,18 +108,12 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-impl<'conn, 'query> AsyncConnectionGatWorkaround<'conn, 'query, diesel::pg::Pg>
-    for AsyncPgConnection
-{
-    type LoadFuture = BoxFuture<'query, QueryResult<Self::Stream>>;
-    type ExecuteFuture = BoxFuture<'query, QueryResult<usize>>;
-    type Stream = BoxStream<'static, QueryResult<PgRow>>;
-
-    type Row = PgRow;
-}
-
 #[async_trait::async_trait]
 impl AsyncConnection for AsyncPgConnection {
+    type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
+    type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
+    type Stream<'conn, 'query> = BoxStream<'static, QueryResult<PgRow>>;
+    type Row<'conn, 'query> = PgRow;
     type Backend = diesel::pg::Pg;
     type TransactionManager = AnsiTransactionManager;
 
@@ -137,10 +129,7 @@ impl AsyncConnection for AsyncPgConnection {
         Self::try_from(client).await
     }
 
-    fn load<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
         T: AsQuery + Send + 'query,
         T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query,
@@ -171,7 +160,7 @@ impl AsyncConnection for AsyncPgConnection {
     fn execute_returning_count<'conn, 'query, T>(
         &'conn mut self,
         source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
+    ) -> Self::ExecuteFuture<'conn, 'query>
     where
         T: QueryFragment<Self::Backend> + QueryId + Send + 'query,
     {
@@ -415,7 +404,7 @@ impl AsyncPgConnection {
             .collect::<Vec<_>>();
         let res = callback(raw_connection, stmt.clone(), binds).await;
         let mut tm = tm.lock().await;
-        update_transaction_manager_status(res, &mut *tm)
+        update_transaction_manager_status(res, &mut tm)
     }
 }
 

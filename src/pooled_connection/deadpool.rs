@@ -63,7 +63,7 @@ pub type HookErrorCause = deadpool::managed::HookErrorCause<super::PoolError>;
 #[async_trait::async_trait]
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
-    C: PoolableConnection + Send,
+    C: PoolableConnection + Send + 'static,
 {
     type Type = C;
 

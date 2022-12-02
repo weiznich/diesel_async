@@ -111,31 +111,30 @@ pub trait SimpleAsyncConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()>;
 }
 
-/// This trait is a workaround to emulate GAT on stable rust
-///
-/// It is used to specify the return type of `AsyncConnection::load`
-/// and `AsyncConnection::execute` which may contain lifetimes
-pub trait AsyncConnectionGatWorkaround<'conn, 'query, DB: Backend> {
-    /// The future returned by `AsyncConnection::execute`
-    type ExecuteFuture: Future<Output = QueryResult<usize>> + Send;
-    /// The future returned by `AsyncConnection::load`
-    type LoadFuture: Future<Output = QueryResult<Self::Stream>> + Send;
-    /// The inner stream returned by `AsyncConnection::load`
-    type Stream: Stream<Item = QueryResult<Self::Row>> + Send;
-    /// The row type used by the stream returned by `AsyncConnection::load`
-    type Row: Row<'conn, DB>;
-}
-
 /// An async connection to a database
 ///
 /// This trait represents a n async database connection. It can be used to query the database through
 /// the query dsl provided by diesel, custom extensions or raw sql queries. It essentially mirrors
 /// the sync diesel [`Connection`](diesel::connection::Connection) implementation
 #[async_trait::async_trait]
-pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send
-where
-    for<'a, 'b> Self: AsyncConnectionGatWorkaround<'a, 'b, Self::Backend>,
-{
+pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
+    /// The future returned by `AsyncConnection::execute`
+    type ExecuteFuture<'conn, 'query>: Future<Output = QueryResult<usize>> + Send
+    where
+        Self: 'conn;
+    /// The future returned by `AsyncConnection::load`
+    type LoadFuture<'conn, 'query>: Future<Output = QueryResult<Self::Stream<'conn, 'query>>> + Send
+    where
+        Self: 'conn;
+    /// The inner stream returned by `AsyncConnection::load`
+    type Stream<'conn, 'query>: Stream<Item = QueryResult<Self::Row<'conn, 'query>>> + Send
+    where
+        Self: 'conn;
+    /// The row type used by the stream returned by `AsyncConnection::load`
+    type Row<'conn, 'query>: Row<'conn, Self::Backend>
+    where
+        Self: 'conn;
+
     /// The backend this type connects to
     type Backend: Backend;
 
@@ -256,10 +255,7 @@ where
     }
 
     #[doc(hidden)]
-    fn load<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::LoadFuture
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
         T: AsQuery + Send + 'query,
         T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query;
@@ -268,7 +264,7 @@ where
     fn execute_returning_count<'conn, 'query, T>(
         &'conn mut self,
         source: T,
-    ) -> <Self as AsyncConnectionGatWorkaround<'conn, 'query, Self::Backend>>::ExecuteFuture
+    ) -> Self::ExecuteFuture<'conn, 'query>
     where
         T: QueryFragment<Self::Backend> + QueryId + Send + 'query;
 
