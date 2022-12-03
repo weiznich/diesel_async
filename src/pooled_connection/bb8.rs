@@ -62,7 +62,7 @@ where
     type Error = PoolError;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        C::establish(&self.connection_url)
+        (self.setup)(&self.connection_url)
             .await
             .map_err(PoolError::ConnectionError)
     }

@@ -5,13 +5,11 @@
 //! * [deadpool](self::deadpool)
 //! * [bb8](self::bb8)
 //! * [mobc](self::mobc)
-
 use crate::TransactionManager;
 use crate::{AsyncConnection, SimpleAsyncConnection};
+use futures::FutureExt;
 use std::fmt;
-use std::marker::PhantomData;
 use std::ops::DerefMut;
-use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "bb8")]
 pub mod bb8;
@@ -48,18 +46,35 @@ impl std::error::Error for PoolError {}
 /// * [bb8](self::bb8)
 /// * [mobc](self::mobc)
 pub struct AsyncDieselConnectionManager<C> {
-    // use arc/mutex here to make `C` always `Send` + `Sync`
-    // so that this type is send + sync
-    p: PhantomData<Arc<Mutex<C>>>,
+    setup:
+        Box<dyn Fn(&str) -> futures::future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>,
     connection_url: String,
 }
 
 impl<C> AsyncDieselConnectionManager<C> {
     /// Returns a new connection manager,
     /// which establishes connections to the given database URL.
-    pub fn new(connection_url: impl Into<String>) -> Self {
+    pub fn new(connection_url: impl Into<String>) -> Self
+    where
+        C: AsyncConnection + 'static,
+    {
+        Self::new_with_setup(connection_url, |url| C::establish(url).boxed())
+    }
+
+    /// Construct a new connection manger
+    /// with a custom setup procedure
+    ///
+    /// This can be used to for example establish a SSL secured
+    /// postgres connection
+    pub fn new_with_setup(
+        connection_url: impl Into<String>,
+        setup: impl Fn(&str) -> futures::future::BoxFuture<diesel::ConnectionResult<C>>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
         Self {
-            p: PhantomData,
+            setup: Box::new(setup),
             connection_url: connection_url.into(),
         }
     }
