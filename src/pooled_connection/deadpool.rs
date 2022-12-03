@@ -70,7 +70,7 @@ where
     type Error = super::PoolError;
 
     async fn create(&self) -> Result<Self::Type, Self::Error> {
-        C::establish(&self.connection_url)
+        (self.setup)(&self.connection_url)
             .await
             .map_err(super::PoolError::ConnectionError)
     }
