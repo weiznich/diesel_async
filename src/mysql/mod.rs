@@ -5,9 +5,9 @@ use diesel::mysql::{Mysql, MysqlType};
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
 use diesel::QueryResult;
-use futures::future::BoxFuture;
-use futures::stream::BoxStream;
-use futures::{Future, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::future::{self, BoxFuture};
+use futures_util::stream::{self, BoxStream};
+use futures_util::{Future, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Opts, OptsBuilder, Statement};
 
@@ -82,7 +82,7 @@ impl AsyncConnection for AsyncMysqlConnection {
                 _ => todo!(),
             };
 
-            let (tx, rx) = futures::channel::mpsc::channel(0);
+            let (tx, rx) = futures_channel::mpsc::channel(0);
 
             let yielder = async move {
                 let r = Self::poll_result_stream(conn, stmt_for_exec, binds, tx).await;
@@ -104,16 +104,15 @@ impl AsyncConnection for AsyncMysqlConnection {
                 r
             };
 
-            let fake_stream =
-                futures::stream::once(yielder).filter_map(|e: QueryResult<()>| async move {
-                    if let Err(e) = e {
-                        Some(Err(e))
-                    } else {
-                        None
-                    }
-                });
+            let fake_stream = stream::once(yielder).filter_map(|e: QueryResult<()>| async move {
+                if let Err(e) = e {
+                    Some(Err(e))
+                } else {
+                    None
+                }
+            });
 
-            let stream = futures::stream::select(fake_stream, rx).boxed();
+            let stream = stream::select(fake_stream, rx).boxed();
 
             Ok(stream)
         })
@@ -222,7 +221,7 @@ impl AsyncMysqlConnection {
     {
         let mut bind_collector = RawBytesBindCollector::<Mysql>::new();
         if let Err(e) = query.collect_binds(&mut bind_collector, &mut (), &Mysql) {
-            return futures::future::ready(Err(e)).boxed();
+            return future::ready(Err(e)).boxed();
         }
 
         let binds = bind_collector.binds;
@@ -250,9 +249,9 @@ impl AsyncMysqlConnection {
         conn: &mut mysql_async::Conn,
         stmt_for_exec: mysql_async::Statement,
         binds: ToSqlHelper,
-        mut tx: futures::channel::mpsc::Sender<QueryResult<MysqlRow>>,
+        mut tx: futures_channel::mpsc::Sender<QueryResult<MysqlRow>>,
     ) -> QueryResult<()> {
-        use futures::SinkExt;
+        use futures_util::sink::SinkExt;
         let res = conn
             .exec_iter(stmt_for_exec, binds)
             .await

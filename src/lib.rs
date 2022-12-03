@@ -70,7 +70,7 @@ use diesel::backend::Backend;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
-use futures::{Future, Stream};
+use futures_util::{Future, Stream};
 
 pub use scoped_futures;
 use scoped_futures::ScopedBoxFuture;

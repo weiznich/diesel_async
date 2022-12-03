@@ -3,7 +3,7 @@ use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::{future, stream, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use std::pin::Pin;
 
 /// The traits used by `QueryDsl`.
@@ -19,7 +19,7 @@ pub mod methods {
     use diesel::expression::QueryMetadata;
     use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
     use diesel::query_dsl::CompatibleType;
-    use futures::{Future, Stream, TryFutureExt};
+    use futures_util::{Future, Stream, TryFutureExt};
 
     /// The `execute` method
     ///
@@ -92,12 +92,12 @@ pub mod methods {
         DB: QueryMetadata<T::SqlType>,
         ST: 'static,
     {
-        type LoadFuture<'conn> = futures::future::MapOk<
+        type LoadFuture<'conn> = future::MapOk<
             Conn::LoadFuture<'conn, 'query>,
             fn(Conn::Stream<'conn, 'query>) -> Self::Stream<'conn>,
         > where Conn: 'conn;
 
-        type Stream<'conn> = futures::stream::Map<
+        type Stream<'conn> = stream::Map<
             Conn::Stream<'conn, 'query>,
             fn(
                 QueryResult<Conn::Row<'conn, 'query>>,
@@ -113,7 +113,7 @@ pub mod methods {
     #[allow(clippy::type_complexity)]
     fn map_result_stream_future<'s, 'a, U, S, R, DB, ST>(
         stream: S,
-    ) -> futures::stream::Map<S, fn(QueryResult<R>) -> QueryResult<U>>
+    ) -> stream::Map<S, fn(QueryResult<R>) -> QueryResult<U>>
     where
         S: Stream<Item = QueryResult<R>> + Send + 's,
         R: diesel::row::Row<'a, DB> + 's,
@@ -144,36 +144,35 @@ pub mod methods {
 pub mod return_futures {
     use super::methods::LoadQuery;
     use diesel::QueryResult;
+    use futures_util::{future, stream};
     use std::pin::Pin;
 
     /// The future returned by [`RunQueryDsl::load`](super::RunQueryDsl::load)
     /// and [`RunQueryDsl::get_results`](super::RunQueryDsl::get_results)
     ///
     /// This is essentially `impl Future<Output = QueryResult<Vec<U>>>`
-    pub type LoadFuture<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> =
-        futures::future::AndThen<
-            Q::LoadFuture<'conn>,
-            futures::stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
-            fn(Q::Stream<'conn>) -> futures::stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
-        >;
+    pub type LoadFuture<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> = future::AndThen<
+        Q::LoadFuture<'conn>,
+        stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
+        fn(Q::Stream<'conn>) -> stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
+    >;
 
     /// The future returned by [`RunQueryDsl::get_result`](super::RunQueryDsl::get_result)
     ///
     /// This is essentially `impl Future<Output = QueryResult<U>>`
-    pub type GetResult<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> =
-        futures::future::AndThen<
-            Q::LoadFuture<'conn>,
-            futures::future::Map<
-                futures::stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
-                fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
-            >,
-            fn(
-                Q::Stream<'conn>,
-            ) -> futures::future::Map<
-                futures::stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
-                fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
-            >,
-        >;
+    pub type GetResult<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> = future::AndThen<
+        Q::LoadFuture<'conn>,
+        future::Map<
+            stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
+            fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
+        >,
+        fn(
+            Q::Stream<'conn>,
+        ) -> future::Map<
+            stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
+            fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
+        >,
+    >;
 }
 
 /// Methods used to execute queries.
@@ -329,7 +328,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         Conn: AsyncConnection,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        fn collect_result<U, S>(stream: S) -> futures::stream::TryCollect<S, Vec<U>>
+        fn collect_result<U, S>(stream: S) -> stream::TryCollect<S, Vec<U>>
         where
             S: Stream<Item = QueryResult<U>>,
         {
@@ -373,14 +372,14 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use diesel::insert_into;
     /// #     use schema::users::dsl::*;
-    /// #     use futures::stream::TryStreamExt;
+    /// #     use futures_util::stream::TryStreamExt;
     /// #     let connection = &mut establish_connection().await;
     /// let data = users.select(name)
     ///     .load_stream::<String>(connection)
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures::future::ready(Ok(acc))
+    ///          futures_util::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// assert_eq!(vec!["Sean", "Tess"], data);
@@ -401,14 +400,14 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use diesel::insert_into;
     /// #     use schema::users::dsl::*;
-    /// #     use futures::stream::TryStreamExt;
+    /// #     use futures_util::stream::TryStreamExt;
     /// #     let connection = &mut establish_connection().await;
     /// let data = users
     ///     .load_stream::<(i32, String)>(connection)
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures::future::ready(Ok(acc))
+    ///          futures_util::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![
@@ -439,14 +438,14 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use diesel::insert_into;
     /// #     use schema::users::dsl::*;
-    /// #     use futures::stream::TryStreamExt;
+    /// #     use futures_util::stream::TryStreamExt;
     /// #     let connection = &mut establish_connection().await;
     /// let data = users
     ///     .load_stream::<User>(connection)
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures::future::ready(Ok(acc))
+    ///          futures_util::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![
@@ -526,8 +525,8 @@ pub trait RunQueryDsl<Conn>: Sized {
         #[allow(clippy::type_complexity)]
         fn get_next_stream_element<S, U>(
             stream: S,
-        ) -> futures::future::Map<
-            futures::stream::StreamFuture<Pin<Box<S>>>,
+        ) -> future::Map<
+            stream::StreamFuture<Pin<Box<S>>>,
             fn((Option<QueryResult<U>>, Pin<Box<S>>)) -> QueryResult<U>,
         >
         where

@@ -7,7 +7,7 @@
 //! * [mobc](self::mobc)
 use crate::TransactionManager;
 use crate::{AsyncConnection, SimpleAsyncConnection};
-use futures::FutureExt;
+use futures_util::{future, FutureExt};
 use std::fmt;
 use std::ops::DerefMut;
 
@@ -46,8 +46,7 @@ impl std::error::Error for PoolError {}
 /// * [bb8](self::bb8)
 /// * [mobc](self::mobc)
 pub struct AsyncDieselConnectionManager<C> {
-    setup:
-        Box<dyn Fn(&str) -> futures::future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>,
+    setup: Box<dyn Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>,
     connection_url: String,
 }
 
@@ -68,10 +67,7 @@ impl<C> AsyncDieselConnectionManager<C> {
     /// postgres connection
     pub fn new_with_setup(
         connection_url: impl Into<String>,
-        setup: impl Fn(&str) -> futures::future::BoxFuture<diesel::ConnectionResult<C>>
-            + Send
-            + Sync
-            + 'static,
+        setup: impl Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync + 'static,
     ) -> Self {
         Self {
             setup: Box::new(setup),

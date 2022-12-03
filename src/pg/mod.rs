@@ -16,10 +16,10 @@ use diesel::pg::{
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
-use futures::future::BoxFuture;
-use futures::lock::Mutex;
-use futures::stream::{BoxStream, TryStreamExt};
-use futures::{Future, FutureExt, StreamExt};
+use futures_util::future::BoxFuture;
+use futures_util::lock::Mutex;
+use futures_util::stream::{BoxStream, TryStreamExt};
+use futures_util::{Future, FutureExt, StreamExt};
 use std::borrow::Cow;
 use std::sync::Arc;
 use tokio_postgres::types::ToSql;
@@ -88,7 +88,7 @@ mod transaction_builder;
 ///       let f2 = q2.get_result::<i32>(conn);
 ///
 ///       // wait on both results
-///       let res = futures::try_join!(f1, f2)?;
+///       let res = futures_util::try_join!(f1, f2)?;
 ///
 ///       assert_eq!(res.0, 1);
 ///       assert_eq!(res.1, 2);
@@ -492,7 +492,7 @@ pub mod tests {
         let f1 = q1.get_result::<i32>(&mut conn);
         let f2 = q2.get_result::<i32>(&mut conn);
 
-        let (r1, r2) = futures::try_join!(f1, f2).unwrap();
+        let (r1, r2) = futures_util::try_join!(f1, f2).unwrap();
 
         assert_eq!(r1, 1);
         assert_eq!(r2, 2);
