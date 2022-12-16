@@ -27,7 +27,7 @@ cfg_if::cfg_if! {
         }
 
         async fn create_tables(connection: &mut AsyncPgConnection) {
-            diesel::sql_query("CREATE TABLE users (
+            diesel::sql_query("CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR NOT NULL
             )").execute(connection).await.unwrap();
@@ -36,7 +36,7 @@ cfg_if::cfg_if! {
             ).execute(connection).await.unwrap();
 
             diesel::sql_query(
-                "CREATE TABLE animals (
+                "CREATE TABLE IF NOT EXISTS animals (
                 id SERIAL PRIMARY KEY,
                 species VARCHAR NOT NULL,
                 legs INTEGER NOT NULL,
@@ -50,7 +50,7 @@ cfg_if::cfg_if! {
              .await.unwrap();
 
             diesel::sql_query(
-                "CREATE TABLE posts (
+                "CREATE TABLE IF NOT EXISTS posts (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 title VARCHAR NOT NULL
@@ -61,7 +61,7 @@ cfg_if::cfg_if! {
                 (1, 'About Rust'),
                 (2, 'My first post too')").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE comments (
+            diesel::sql_query("CREATE TABLE IF NOT EXISTS comments (
                 id SERIAL PRIMARY KEY,
                 post_id INTEGER NOT NULL,
                 body VARCHAR NOT NULL
@@ -71,7 +71,7 @@ cfg_if::cfg_if! {
                 (2, 'Yay! I am learning Rust'),
                 (3, 'I enjoyed your post')").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE brands (
+            diesel::sql_query("CREATE TABLE IF NOT EXISTS brands (
                 id SERIAL PRIMARY KEY,
                 color VARCHAR NOT NULL DEFAULT 'Green',
                 accent VARCHAR DEFAULT 'Blue'
