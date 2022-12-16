@@ -3,7 +3,7 @@
 //! ```rust
 //! # include!("../doctest_setup.rs");
 //! use diesel::result::Error;
-//! use futures::FutureExt;
+//! use futures_util::FutureExt;
 //! use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 //! use diesel_async::pooled_connection::bb8::Pool;
 //! use diesel_async::RunQueryDsl;

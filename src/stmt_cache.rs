@@ -5,17 +5,16 @@ use diesel::backend::Backend;
 use diesel::connection::statement_cache::{MaybeCached, PrepareForCache, StatementCacheKey};
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::QueryResult;
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures_util::{future, FutureExt};
 
 #[derive(Default)]
 pub struct StmtCache<DB: Backend, S> {
     cache: HashMap<StatementCacheKey<DB>, S>,
 }
 
-type PrepareFuture<'a, F, S> = futures::future::Either<
-    futures::future::Ready<QueryResult<(MaybeCached<'a, S>, F)>>,
-    BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
+type PrepareFuture<'a, F, S> = future::Either<
+    future::Ready<QueryResult<(MaybeCached<'a, S>, F)>>,
+    future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
 >;
 
 #[async_trait::async_trait]
@@ -56,18 +55,18 @@ impl<S, DB: Backend> StmtCache<DB, S> {
 
         let cache_key = match StatementCacheKey::for_source(&query, metadata, backend) {
             Ok(key) => key,
-            Err(e) => return futures::future::Either::Left(futures::future::ready(Err(e))),
+            Err(e) => return future::Either::Left(future::ready(Err(e))),
         };
 
         let is_query_safe_to_cache = match query.is_safe_to_cache_prepared(backend) {
             Ok(is_safe_to_cache) => is_safe_to_cache,
-            Err(e) => return futures::future::Either::Left(futures::future::ready(Err(e))),
+            Err(e) => return future::Either::Left(future::ready(Err(e))),
         };
 
         if !is_query_safe_to_cache {
             let sql = match cache_key.sql(&query, backend) {
                 Ok(sql) => sql.into_owned(),
-                Err(e) => return futures::future::Either::Left(futures::future::ready(Err(e))),
+                Err(e) => return future::Either::Left(future::ready(Err(e))),
             };
 
             let metadata = metadata.to_vec();
@@ -78,18 +77,18 @@ impl<S, DB: Backend> StmtCache<DB, S> {
                 Ok((MaybeCached::CannotCache(stmt.0), stmt.1))
             }
             .boxed();
-            return futures::future::Either::Right(f);
+            return future::Either::Right(f);
         }
 
         match self.cache.entry(cache_key) {
-            Occupied(entry) => futures::future::Either::Left(futures::future::ready(Ok((
+            Occupied(entry) => future::Either::Left(future::ready(Ok((
                 MaybeCached::Cached(entry.into_mut()),
                 prepare_fn,
             )))),
             Vacant(entry) => {
                 let sql = match entry.key().sql(&query, backend) {
                     Ok(sql) => sql.into_owned(),
-                    Err(e) => return futures::future::Either::Left(futures::future::ready(Err(e))),
+                    Err(e) => return future::Either::Left(future::ready(Err(e))),
                 };
                 let metadata = metadata.to_vec();
                 let f = async move {
@@ -100,7 +99,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
                     Ok((MaybeCached::Cached(entry.insert(statement.0)), statement.1))
                 }
                 .boxed();
-                futures::future::Either::Right(f)
+                future::Either::Right(f)
             }
         }
     }
