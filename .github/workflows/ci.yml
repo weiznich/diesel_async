@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'Windows' && matrix.backend == 'postgres'
         shell: bash
         run: |
-          choco install postgresql14 --force --params '/Password:root'
+          choco install postgresql15 --force --params '/Password:root'
           echo "DATABASE_URL=postgres://postgres:root@localhost/" >> $GITHUB_ENV
 
       - name: Install mysql (Windows)
