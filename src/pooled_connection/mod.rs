@@ -53,8 +53,7 @@ pub struct AsyncDieselConnectionManager<C> {
 impl<C> std::fmt::Debug for AsyncDieselConnectionManager<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AsyncDieselConnectionManager")
-            .field("connection_url", &self.connection_url)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
