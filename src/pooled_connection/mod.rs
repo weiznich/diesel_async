@@ -50,6 +50,14 @@ pub struct AsyncDieselConnectionManager<C> {
     connection_url: String,
 }
 
+impl<C> std::fmt::Debug for AsyncDieselConnectionManager<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncDieselConnectionManager")
+            .field("connection_url", &self.connection_url)
+            .finish()
+    }
+}
+
 impl<C> AsyncDieselConnectionManager<C> {
     /// Returns a new connection manager,
     /// which establishes connections to the given database URL.

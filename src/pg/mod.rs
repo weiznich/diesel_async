@@ -101,6 +101,12 @@ pub struct AsyncPgConnection {
     metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
 }
 
+impl std::fmt::Debug for AsyncPgConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncPgConnection").finish()
+    }
+}
+
 #[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
