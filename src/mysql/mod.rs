@@ -90,7 +90,7 @@ impl AsyncConnection for AsyncMysqlConnection {
                 // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
                 // for details
                 //
-                // This might be problematic for cases where the stream is droped before the end is reached
+                // This might be problematic for cases where the stream is dropped before the end is reached
                 //
                 // Such behaviour might happen if users:
                 // * Just drop the future/stream after polling at least once (timeouts!!)
@@ -135,7 +135,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
             // for details
             //
-            // This might be problematic for cases where the stream is droped before the end is reached
+            // This might be problematic for cases where the stream is dropped before the end is reached
             //
             // Such behaviour might happen if users:
             // * Just drop the future after polling at least once (timeouts!!)

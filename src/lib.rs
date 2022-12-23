@@ -1,7 +1,7 @@
 #![cfg_attr(doc_cfg, feature(doc_cfg, doc_auto_cfg))]
-//! Diesel-async provides async variants of diesel releated query functionality
+//! Diesel-async provides async variants of diesel related query functionality
 //!
-//! diesel-async is an extension to diesel itself. It is designed to be used togehter
+//! diesel-async is an extension to diesel itself. It is designed to be used together
 //! with the main diesel crate. It only provides async variants of core diesel traits,
 //! that perform actual io-work.
 //! This includes async counterparts the following traits:
@@ -174,7 +174,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// If a nested transaction fails to release the corresponding savepoint
     /// the error will be returned directly.
     ///
-    /// **WARNING:** Cancling the returned future does currently **not**
+    /// **WARNING:** Canceling the returned future does currently **not**
     /// close an already open transaction. You may end up with a connection
     /// containing a dangling transaction.
     ///
@@ -247,7 +247,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
         };
         Self::TransactionManager::begin_transaction(self).await?;
         // set the test transaction flag
-        // to pervent that this connection gets droped in connection pools
+        // to prevent that this connection gets dropped in connection pools
         // Tests commonly set the poolsize to 1 and use `begin_test_transaction`
         // to prevent modifications to the schema
         Self::TransactionManager::transaction_manager_status_mut(self).set_test_transaction_flag();
