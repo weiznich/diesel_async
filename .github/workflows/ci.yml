@@ -77,8 +77,7 @@ jobs:
       - name: Install mysql (MacOS)
         if: runner.os == 'macOS' && matrix.backend == 'mysql'
         run: |
-          brew update
-          brew install mariadb@10.8
+          brew install --overwrite mariadb@10.8
           /usr/local/opt/mariadb@10.8/bin/mysql_install_db
           /usr/local/opt/mariadb@10.8/bin/mysql.server start
           sleep 3
