@@ -58,7 +58,7 @@ async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
     );
 
     let count = users::table.count().get_result::<i64>(conn).await?;
-    assert_eq!(count, 2, "user got commited, but transaction rolled back");
+    assert_eq!(count, 2, "user got committed, but transaction rolled back");
 
     Ok(())
 }

@@ -134,11 +134,11 @@ pub mod methods {
     }
 }
 
-/// The return types produces by the various [`RunQueryDsl`] methods
+/// The return types produced by the various [`RunQueryDsl`] methods
 ///
 // We cannot box these types as this would require specifying a lifetime,
 // but concrete connection implementations might want to have control
-// about that so that they can support multiple simultan queries on
+// about that so that they can support multiple simultaneous queries on
 // the same connection
 #[allow(type_alias_bounds)] // we need these bounds otherwise we cannot use GAT's
 pub mod return_futures {
