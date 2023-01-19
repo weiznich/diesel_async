@@ -1,10 +1,10 @@
-use std::borrow::Cow;
-
+use diesel::backend::Backend;
 use diesel::mysql::data_types::{MysqlTime, MysqlTimestampType};
 use diesel::mysql::{Mysql, MysqlType, MysqlValue};
-use diesel::row::{PartialRow, RowGatWorkaround, RowIndex};
+use diesel::row::{PartialRow, RowIndex, RowSealed};
 use mysql_async::consts::{ColumnFlags, ColumnType};
 use mysql_async::{Column, Row, Value};
+use std::borrow::Cow;
 
 pub struct MysqlRow(pub(super) Row);
 
@@ -15,10 +15,6 @@ impl mysql_async::prelude::FromRow for MysqlRow {
     {
         Ok(Self(row))
     }
-}
-
-impl<'a> RowGatWorkaround<'a, Mysql> for MysqlRow {
-    type Field = MysqlField<'a>;
 }
 
 impl RowIndex<usize> for MysqlRow {
@@ -37,17 +33,17 @@ impl<'a> RowIndex<&'a str> for MysqlRow {
     }
 }
 
+impl RowSealed for MysqlRow {}
+
 impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
     type InnerPartialRow = Self;
+    type Field<'b> = MysqlField<'b> where Self: 'b, 'a: 'b;
 
     fn field_count(&self) -> usize {
         self.0.columns_ref().len()
     }
 
-    fn get<'b, I>(
-        &'b self,
-        idx: I,
-    ) -> Option<<Self as diesel::row::RowGatWorkaround<'b, Mysql>>::Field>
+    fn get<'b, I>(&'b self, idx: I) -> Option<Self::Field<'b>>
     where
         'a: 'b,
         Self: diesel::row::RowIndex<I>,
@@ -132,7 +128,7 @@ impl<'a> diesel::row::Field<'a, Mysql> for MysqlField<'_> {
         Some(&*self.name)
     }
 
-    fn value(&self) -> Option<diesel::backend::RawValue<Mysql>> {
+    fn value(&self) -> Option<<Mysql as Backend>::RawValue<'_>> {
         self.value.as_ref().map(|v| {
             MysqlValue::new(
                 v,
