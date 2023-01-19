@@ -48,3 +48,6 @@ features = ["postgres", "mysql", "deadpool", "bb8", "mobc"]
 no-default-features = true
 rustc-args = ["--cfg", "doc_cfg"]
 rustdoc-args = ["--cfg", "doc_cfg"]
+
+[patch.crates-io]
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "88129db" }

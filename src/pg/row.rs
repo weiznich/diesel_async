@@ -1,6 +1,6 @@
+use diesel::backend::Backend;
+use diesel::row::{Field, PartialRow, RowIndex, RowSealed};
 use std::{error::Error, num::NonZeroU32};
-
-use diesel::row::{Field, PartialRow, RowIndex};
 use tokio_postgres::{types::Type, Row};
 
 pub struct PgRow {
@@ -12,22 +12,17 @@ impl PgRow {
         Self { row }
     }
 }
-
-impl<'a> diesel::row::RowGatWorkaround<'a, diesel::pg::Pg> for PgRow {
-    type Field = PgField<'a>;
-}
+impl RowSealed for PgRow {}
 
 impl<'a> diesel::row::Row<'a, diesel::pg::Pg> for PgRow {
     type InnerPartialRow = Self;
+    type Field<'b> = PgField<'b> where Self: 'b, 'a: 'b;
 
     fn field_count(&self) -> usize {
         self.row.len()
     }
 
-    fn get<'b, I>(
-        &'b self,
-        idx: I,
-    ) -> Option<<Self as diesel::row::RowGatWorkaround<'b, diesel::pg::Pg>>::Field>
+    fn get<'b, I>(&'b self, idx: I) -> Option<Self::Field<'b>>
     where
         'a: 'b,
         Self: diesel::row::RowIndex<I>,
@@ -73,7 +68,7 @@ impl<'a> Field<'a, diesel::pg::Pg> for PgField<'a> {
         Some(self.row.columns()[self.idx].name())
     }
 
-    fn value(&self) -> Option<diesel::backend::RawValue<diesel::pg::Pg>> {
+    fn value(&self) -> Option<<diesel::pg::Pg as Backend>::RawValue<'_>> {
         let DieselFromSqlWrapper(value) = self.row.get(self.idx);
         value
     }
