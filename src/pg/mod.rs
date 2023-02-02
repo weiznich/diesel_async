@@ -296,6 +296,11 @@ impl AsyncPgConnection {
         Ok(conn)
     }
 
+    /// Constructs a cancellation token that can later be used to request cancellation of a query running on the connection associated with this client.
+    pub fn cancel_token(&self) -> tokio_postgres::CancelToken {
+        self.conn.cancel_token()
+    }
+
     async fn set_config_options(&mut self) -> QueryResult<()> {
         use crate::run_query_dsl::RunQueryDsl;
 
