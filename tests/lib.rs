@@ -1,5 +1,5 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
-use diesel::QueryResult;
+use diesel::{sql_function, QueryResult};
 use diesel_async::*;
 use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
@@ -109,6 +109,45 @@ async fn setup(connection: &mut TestConnection) {
     .execute(connection)
     .await
     .unwrap();
+}
+
+#[cfg(feature = "postgres")]
+sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn postgres_cancel_token() {
+    use std::time::Duration;
+
+    use diesel::result::{DatabaseErrorKind, Error};
+
+    let conn = &mut connection().await;
+
+    let token = conn.cancel_token();
+
+    // execute a query that runs for a long time
+    let long_running_query = diesel::select(pg_sleep(5.0)).execute(conn);
+
+    // execute the query elsewhere...
+    let task = tokio::spawn(async move {
+        long_running_query
+            .await
+            .expect_err("query should have been canceled.")
+    });
+
+    // let the task above have some time to actually start...
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // invoke the cancellation token.
+    token.cancel_query(tokio_postgres::NoTls).await.unwrap();
+
+    // make sure the query task resulted in a cancellation error
+    let err = task.await.unwrap();
+    match err {
+        Error::DatabaseError(DatabaseErrorKind::Unknown, v)
+            if v.message() == "canceling statement due to user request" => {}
+        _ => panic!("unexpected error: {:?}", err),
+    }
 }
 
 #[cfg(feature = "postgres")]
