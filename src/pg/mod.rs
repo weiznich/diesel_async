@@ -123,7 +123,7 @@ impl AsyncConnection for AsyncPgConnection {
             .map_err(ErrorHelper)?;
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
+                eprintln!("connection error: {e}");
             }
         });
         Self::try_from(client).await
