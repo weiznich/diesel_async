@@ -161,8 +161,8 @@ async fn test_timestamp() {
     type_check::<_, sql_types::Timestamp>(
         conn,
         chrono::NaiveDateTime::new(
-            chrono::NaiveDate::from_ymd(2021, 09, 27),
-            chrono::NaiveTime::from_hms_milli(17, 44, 23, 0),
+            chrono::NaiveDate::from_ymd_opt(2021, 09, 27).unwrap(),
+            chrono::NaiveTime::from_hms_milli_opt(17, 44, 23, 0).unwrap(),
         ),
     )
     .await;
@@ -171,13 +171,18 @@ async fn test_timestamp() {
 #[tokio::test]
 async fn test_date() {
     let conn = &mut connection().await;
-    type_check::<_, sql_types::Date>(conn, chrono::NaiveDate::from_ymd(2021, 09, 27)).await;
+    type_check::<_, sql_types::Date>(conn, chrono::NaiveDate::from_ymd_opt(2021, 09, 27).unwrap())
+        .await;
 }
 
 #[tokio::test]
 async fn test_time() {
     let conn = &mut connection().await;
-    type_check::<_, sql_types::Time>(conn, chrono::NaiveTime::from_hms_milli(17, 44, 23, 0)).await;
+    type_check::<_, sql_types::Time>(
+        conn,
+        chrono::NaiveTime::from_hms_milli_opt(17, 44, 23, 0).unwrap(),
+    )
+    .await;
 }
 
 #[cfg(feature = "mysql")]
@@ -187,8 +192,8 @@ async fn test_datetime() {
     type_check::<_, sql_types::Datetime>(
         conn,
         chrono::NaiveDateTime::new(
-            chrono::NaiveDate::from_ymd(2021, 09, 30),
-            chrono::NaiveTime::from_hms_milli(12, 06, 42, 0),
+            chrono::NaiveDate::from_ymd_opt(2021, 09, 30).unwrap(),
+            chrono::NaiveTime::from_hms_milli_opt(12, 06, 42, 0).unwrap(),
         ),
     )
     .await;
