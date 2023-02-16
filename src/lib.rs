@@ -66,14 +66,17 @@
 //! ```
 
 #![warn(missing_docs)]
+
 use diesel::backend::Backend;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
+use diesel::result::Error;
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures_util::{Future, Stream};
+use std::fmt::Debug;
 
 pub use scoped_futures;
-use scoped_futures::ScopedBoxFuture;
+use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 
 #[cfg(feature = "mysql")]
 mod mysql;
@@ -252,6 +255,30 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
         // to prevent modifications to the schema
         Self::TransactionManager::transaction_manager_status_mut(self).set_test_transaction_flag();
         Ok(())
+    }
+
+    #[doc(hidden)]
+    fn test_transaction<'a, R, E, F>(&'a mut self, f: F) -> ScopedBoxFuture<'a, 'a, R>
+    where
+        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        E: Debug + Send + 'a,
+        R: Send + 'a,
+        Self: 'a,
+    {
+        async move {
+            self.transaction::<R, _, _>(|c| {
+                async move {
+                    match f(c).await {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(Error::RollbackTransaction),
+                    }
+                }
+                .scope_boxed()
+            })
+            .await
+            .expect("Test Transaction did not succeed")
+        }
+        .scope_boxed()
     }
 
     #[doc(hidden)]
