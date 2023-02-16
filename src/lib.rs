@@ -66,14 +66,17 @@
 //! ```
 
 #![warn(missing_docs)]
+
 use diesel::backend::Backend;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
+use diesel::result::Error;
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures_util::{Future, Stream};
+use std::fmt::Debug;
 
 pub use scoped_futures;
-use scoped_futures::ScopedBoxFuture;
+use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 
 #[cfg(feature = "mysql")]
 mod mysql;
@@ -252,6 +255,65 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
         // to prevent modifications to the schema
         Self::TransactionManager::transaction_manager_status_mut(self).set_test_transaction_flag();
         Ok(())
+    }
+
+    /// Executes the given function inside a transaction, but does not commit
+    /// it. Panics if the given function returns an error.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # include!("doctest_setup.rs");
+    /// use diesel::result::Error;
+    /// use scoped_futures::ScopedFutureExt;
+    ///
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     use schema::users::dsl::*;
+    /// #     let conn = &mut establish_connection().await;
+    /// conn.test_transaction::<_, Error, _>(|conn| async move {
+    ///     diesel::insert_into(users)
+    ///         .values(name.eq("Ruby"))
+    ///         .execute(conn)
+    ///         .await?;
+    ///
+    ///     let all_names = users.select(name).load::<String>(conn).await?;
+    ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
+    ///
+    ///     Ok(())
+    /// }.scope_boxed()).await;
+    ///
+    /// // Even though we returned `Ok`, the transaction wasn't committed.
+    /// let all_names = users.select(name).load::<String>(conn).await?;
+    /// assert_eq!(vec!["Sean", "Tess"], all_names);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    async fn test_transaction<'a, R, E, F>(&'a mut self, f: F) -> R
+    where
+        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        E: Debug + Send + 'a,
+        R: Send + 'a,
+        Self: 'a,
+    {
+        use futures_util::TryFutureExt;
+
+        let mut user_result = None;
+        let _ = self
+            .transaction::<R, _, _>(|c| {
+                f(c).map_err(|_| Error::RollbackTransaction)
+                    .and_then(|r| {
+                        user_result = Some(r);
+                        futures_util::future::ready(Err(Error::RollbackTransaction))
+                    })
+                    .scope_boxed()
+            })
+            .await;
+        user_result.expect("Transaction did not succeed")
     }
 
     #[doc(hidden)]

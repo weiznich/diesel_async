@@ -39,6 +39,9 @@ impl fmt::Display for PoolError {
 
 impl std::error::Error for PoolError {}
 
+type SetupCallback<C> =
+    Box<dyn Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>;
+
 /// An connection manager for use with diesel-async.
 ///
 /// See the concrete pool implementations for examples:
@@ -46,7 +49,7 @@ impl std::error::Error for PoolError {}
 /// * [bb8](self::bb8)
 /// * [mobc](self::mobc)
 pub struct AsyncDieselConnectionManager<C> {
-    setup: Box<dyn Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>,
+    setup: SetupCallback<C>,
     connection_url: String,
 }
 

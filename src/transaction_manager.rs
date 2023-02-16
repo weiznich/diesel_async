@@ -292,7 +292,7 @@ where
         let start_transaction_sql = match transaction_state.transaction_depth() {
             None => Cow::from("BEGIN"),
             Some(transaction_depth) => {
-                Cow::from(format!("SAVEPOINT diesel_savepoint_{}", transaction_depth))
+                Cow::from(format!("SAVEPOINT diesel_savepoint_{transaction_depth}"))
             }
         };
         conn.batch_execute(&start_transaction_sql).await?;
