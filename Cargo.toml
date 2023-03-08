@@ -13,7 +13,7 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-diesel = { version = "2.0.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
+diesel = { version = "~2.0.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
 async-trait = "0.1.51"
 futures-channel = { version = "0.3.17", default-features = false, features = ["std", "sink"], optional = true }
 futures-util = { version = "0.3.17", default-features = false, features = ["std", "sink"] }
