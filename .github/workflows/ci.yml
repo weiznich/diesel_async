@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 0.2.x
 
 name: CI Tests
 
@@ -142,3 +143,21 @@ jobs:
 
       - name: Check formating
         run: cargo +stable fmt --all -- --check
+  minimal_rust_version:
+    name: Check Minimal supported rust version (1.65.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: taiki-e/install-action@cargo-minimal-versions
+      - name: Cache cargo registry
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: minimal_rust_version-cargo-${{ hashFiles('**/Cargo.toml') }}
+      - name: Check diesel_derives
+        run: cargo +stable minimal-versions check -p diesel_async --all-features
