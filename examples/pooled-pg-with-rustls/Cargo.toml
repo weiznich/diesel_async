@@ -1,0 +1,16 @@
+[package]
+name = "pooled-pg-with-rustls"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diesel = { version = "2.0.3", default-features = false, features = ["postgres"] }
+diesel-async = { version = "0.2.0", features = ["bb8", "postgres"] }
+futures-util = "0.3.21"
+rustls = "0.20.8"
+rustls-native-certs = "0.6.2"
+tokio = { version = "1.2.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio-postgres = "0.7.7"
+tokio-postgres-rustls = "0.9.0"
