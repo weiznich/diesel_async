@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConnection>> {
     let fut = async {
+        // We first set up the way we want rustls to work.
         let rustls_config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(root_certs())

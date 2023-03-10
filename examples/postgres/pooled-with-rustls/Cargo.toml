@@ -1,5 +1,5 @@
 [package]
-name = "pooled-pg-with-rustls"
+name = "pooled-with-rustls"
 version = "0.1.0"
 edition = "2021"
 
