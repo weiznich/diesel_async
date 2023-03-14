@@ -152,14 +152,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@cargo-minimal-versions
-      - name: Cache cargo registry
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: minimal_rust_version-cargo-${{ hashFiles('**/Cargo.toml') }}
-      - name: Check diesel_derives
+      - name: Check diesel-async
         # cannot test mysql yet as that crate
         # has broken min-version dependencies
         run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
