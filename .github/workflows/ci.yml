@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.65.0
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-hack
       - uses: taiki-e/install-action@cargo-minimal-versions
@@ -160,4 +160,6 @@ jobs:
             ~/.cargo/git
           key: minimal_rust_version-cargo-${{ hashFiles('**/Cargo.toml') }}
       - name: Check diesel_derives
-        run: cargo +stable minimal-versions check -p diesel-async --all-features
+        # cannot test mysql yet as that crate
+        # has broken min-version dependencies
+        run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
