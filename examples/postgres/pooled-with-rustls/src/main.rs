@@ -17,6 +17,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         establish_connection,
     );
     // From that connection we can then create a pool, here given with some example settings.
+    //
+    // This creates a TLS configuration that's equivalent to `libpq'` `sslmode=verify-full`, which
+    // means this will check whether the provided certificate is valid for the given database host.
+    //
+    // `libpq` does not perform these checks by default (https://www.postgresql.org/docs/current/libpq-connect.html)
+    // If you hit a TLS error while conneting to the database double check your certificates
     let pool = Pool::builder()
         .max_size(10)
         .min_idle(Some(5))
