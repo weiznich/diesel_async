@@ -115,6 +115,9 @@ jobs:
 
       - name: Test diesel_async
         run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc"
+      - name: Run examples
+        if: matrix.backend == 'postgres'
+        run: cargo +${{ matrix.rust }} check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
 
   rustfmt_and_clippy:
     name: Check rustfmt style && run clippy

@@ -51,3 +51,9 @@ rustdoc-args = ["--cfg", "doc_cfg"]
 
 [patch.crates-io]
 diesel = { git = "https://github.com/diesel-rs/diesel", rev = "b878fed" }
+
+[workspace]
+members = [
+        ".",
+        "examples/postgres/pooled-with-rustls"
+]
