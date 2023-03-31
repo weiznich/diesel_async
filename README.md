@@ -123,7 +123,7 @@ use diesel_async::RunQueryDsl;
 
 // create a new connection pool with the default config
 let config = AsyncDieselConnectionManager::<diesel_async::AsyncPgConnection>::new(std::env::var("DATABASE_URL")?);
-let pool = Pool::builder().build(config)?;
+let pool = Pool::builder(config).build()?;
 
 // checkout a connection from the pool
 let mut conn = pool.get().await?;
