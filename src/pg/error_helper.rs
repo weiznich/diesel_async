@@ -20,6 +20,8 @@ impl From<ErrorHelper> for diesel::result::Error {
                     SqlState::FOREIGN_KEY_VIOLATION => ForeignKeyViolation,
                     SqlState::T_R_SERIALIZATION_FAILURE => SerializationFailure,
                     SqlState::READ_ONLY_SQL_TRANSACTION => ReadOnlyTransaction,
+                    SqlState::NOT_NULL_VIOLATION => NotNullViolation,
+                    SqlState::CHECK_VIOLATION => CheckViolation,
                     _ => Unknown,
                 };
 
