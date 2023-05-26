@@ -4,6 +4,10 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
+## [0.3.0] - 2023-05-26
+
+* Compatibility with diesel 2.1
+
 ## [0.2.2] - 2023-04-14
 
 * Dependency updates for `mysql-async` to allow newer versions
@@ -35,3 +39,6 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 [0.1.1]: https://github.com/weiznich/diesel_async/compare/v0.1.0...v0.1.1
 [0.2.0]: https://github.com/weiznich/diesel_async/compare/v0.1.1...v0.2.0
+[0.2.1]: https://github.com/weiznich/diesel_async/compare/v0.2.0...v0.2.1
+[0.2.2]: https://github.com/weiznich/diesel_async/compare/v0.2.1...v0.2.2
+[0.3.0]: https://github.com/weiznich/diesel_async/compare/v0.2.0...v0.3.0

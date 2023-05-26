@@ -1,6 +1,6 @@
 [package]
 name = "diesel-async"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Georg Semmler <github@weiznich.de>"]
 edition = "2018"
 autotests = false
@@ -13,7 +13,7 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.65.0"
 
 [dependencies]
-diesel = { version = "~2.0.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
+diesel = { version = "~2.1.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
 async-trait = "0.1.66"
 futures-channel = { version = "0.3.17", default-features = false, features = ["std", "sink"], optional = true }
 futures-util = { version = "0.3.17", default-features = false, features = ["std", "sink"] }
@@ -48,9 +48,6 @@ features = ["postgres", "mysql", "deadpool", "bb8", "mobc"]
 no-default-features = true
 rustc-args = ["--cfg", "doc_cfg"]
 rustdoc-args = ["--cfg", "doc_cfg"]
-
-[patch.crates-io]
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "b878fed" }
 
 [workspace]
 members = [
