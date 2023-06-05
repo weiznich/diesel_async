@@ -5,8 +5,10 @@
 //! * [deadpool](self::deadpool)
 //! * [bb8](self::bb8)
 //! * [mobc](self::mobc)
-use crate::TransactionManager;
 use crate::{AsyncConnection, SimpleAsyncConnection};
+use crate::{TransactionManager, UpdateAndFetchResults};
+use diesel::associations::HasTable;
+use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 use std::fmt;
 use std::ops::DerefMut;
@@ -185,6 +187,21 @@ where
         conn: &mut C,
     ) -> &mut crate::transaction_manager::TransactionManagerStatus {
         TM::transaction_manager_status_mut(&mut **conn)
+    }
+}
+
+#[async_trait::async_trait]
+impl<'b, Changes, Output, Conn> UpdateAndFetchResults<Changes, Output> for Conn
+where
+    Conn: DerefMut + Send,
+    Changes: diesel::prelude::Identifiable + HasTable + Send,
+    Conn::Target: UpdateAndFetchResults<Changes, Output>,
+{
+    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
+    where
+        Changes: 'async_trait,
+    {
+        self.deref_mut().update_and_fetch(changeset).await
     }
 }
 

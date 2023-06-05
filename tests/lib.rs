@@ -7,6 +7,8 @@ use std::pin::Pin;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
+#[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
+mod pooling;
 mod type_check;
 
 async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
@@ -70,7 +72,14 @@ diesel::table! {
     }
 }
 
-#[derive(diesel::Queryable, diesel::Selectable, Debug, PartialEq)]
+#[derive(
+    diesel::Queryable,
+    diesel::Selectable,
+    Debug,
+    PartialEq,
+    diesel::AsChangeset,
+    diesel::Identifiable,
+)]
 struct User {
     id: i32,
     name: String,
@@ -101,7 +110,7 @@ async fn test_basic_insert_and_load() -> QueryResult<()> {
 #[cfg(feature = "mysql")]
 async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
-        "CREATE TABLE IF NOT EXISTS users (
+        "CREATE TEMPORARY TABLE users (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 name TEXT NOT NULL
             ) CHARACTER SET utf8mb4",
@@ -153,7 +162,7 @@ async fn postgres_cancel_token() {
 #[cfg(feature = "postgres")]
 async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
-        "CREATE TABLE IF NOT EXISTS users (
+        "CREATE TEMPORARY TABLE users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR NOT NULL
             )",
