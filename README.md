@@ -27,8 +27,8 @@ A normal project should use a setup similar to the following one:
 
 ```toml
 [dependencies]
-diesel = "2.0.3" # no backend features need to be enabled
-diesel-async = { version = "0.2.1", features = ["postgres"] }
+diesel = "2.1.0" # no backend features need to be enabled
+diesel-async = { version = "0.3.1", features = ["postgres"] }
 ```
 
 This allows to import the relevant traits from both crates:
@@ -50,11 +50,11 @@ table! {
 #[diesel(table_name = users)]
 struct User {
     id: i32,
-    name: Text,
+    name: String,
 }
 
 // create an async connection
-let mut connection = AsyncPgConnection::establish(std::env::var("DATABASE_URL")?).await?;
+let mut connection = AsyncPgConnection::establish(&std::env::var("DATABASE_URL")?).await?;
 
 // use ordinary diesel query dsl to construct your query
 let data: Vec<User> = users::table
