@@ -43,13 +43,14 @@ where
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// # use diesel::sql_query;
+    /// use diesel_async::RunQueryDsl;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #     run_test().await.unwrap();
     /// # }
     /// #
-    /// # table! {
+    /// # diesel::table! {
     /// #     users_for_read_only {
     /// #         id -> Integer,
     /// #         name -> Text,
@@ -98,6 +99,8 @@ where
     /// # include!("../doctest_setup.rs");
     /// # use diesel::result::Error::RollbackTransaction;
     /// # use diesel::sql_query;
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {

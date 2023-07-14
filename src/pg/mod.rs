@@ -9,19 +9,20 @@ use self::row::PgRow;
 use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
-use diesel::connection::statement_cache::PrepareForCache;
+use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
 use diesel::pg::{
-    FailedToLookupTypeError, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgTypeMetadata,
+    FailedToLookupTypeError, Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup,
+    PgQueryBuilder, PgTypeMetadata,
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
-use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
+use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
 use futures_util::future::BoxFuture;
-use futures_util::lock::Mutex;
 use futures_util::stream::{BoxStream, TryStreamExt};
 use futures_util::{Future, FutureExt, StreamExt};
 use std::borrow::Cow;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::types::Type;
 use tokio_postgres::Statement;
@@ -71,6 +72,8 @@ mod transaction_builder;
 ///
 /// ```rust
 /// # include!("../doctest_setup.rs");
+/// use diesel_async::RunQueryDsl;
+///
 /// #
 /// # #[tokio::main(flavor = "current_thread")]
 /// # async fn main() {
@@ -98,7 +101,7 @@ pub struct AsyncPgConnection {
     conn: Arc<tokio_postgres::Client>,
     stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
     transaction_state: Arc<Mutex<AnsiTransactionManager>>,
-    metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
+    metadata_cache: Arc<Mutex<PgMetadataCache>>,
 }
 
 #[async_trait::async_trait]
@@ -131,29 +134,18 @@ impl AsyncConnection for AsyncPgConnection {
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
-        T: AsQuery + Send + 'query,
-        T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query,
+        T: AsQuery + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        let conn = self.conn.clone();
-        let stmt_cache = self.stmt_cache.clone();
-        let metadata_cache = self.metadata_cache.clone();
-        let tm = self.transaction_state.clone();
         let query = source.as_query();
-        Self::with_prepared_statement(
-            conn,
-            stmt_cache,
-            metadata_cache,
-            tm,
-            query,
-            |conn, stmt, binds| async move {
-                let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
+        self.with_prepared_statement(query, |conn, stmt, binds| async move {
+            let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
 
-                Ok(res
-                    .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
-                    .map_ok(PgRow::new)
-                    .boxed())
-            },
-        )
+            Ok(res
+                .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
+                .map_ok(PgRow::new)
+                .boxed())
+        })
         .boxed()
     }
 
@@ -162,26 +154,19 @@ impl AsyncConnection for AsyncPgConnection {
         source: T,
     ) -> Self::ExecuteFuture<'conn, 'query>
     where
-        T: QueryFragment<Self::Backend> + QueryId + Send + 'query,
+        T: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        Self::with_prepared_statement(
-            self.conn.clone(),
-            self.stmt_cache.clone(),
-            self.metadata_cache.clone(),
-            self.transaction_state.clone(),
-            source,
-            |conn, stmt, binds| async move {
-                let binds = binds
-                    .iter()
-                    .map(|b| b as &(dyn ToSql + Sync))
-                    .collect::<Vec<_>>();
+        self.with_prepared_statement(source, |conn, stmt, binds| async move {
+            let binds = binds
+                .iter()
+                .map(|b| b as &(dyn ToSql + Sync))
+                .collect::<Vec<_>>();
 
-                let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
-                    .await
-                    .map_err(ErrorHelper)?;
-                Ok(res as usize)
-            },
-        )
+            let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
+                .await
+                .map_err(ErrorHelper)?;
+            Ok(res as usize)
+        })
         .boxed()
     }
 
@@ -209,7 +194,7 @@ fn update_transaction_manager_status<T>(
     {
         transaction_manager
             .status
-            .set_top_level_transaction_requires_rollback()
+            .set_requires_rollback_maybe_up_to_top_level(true)
     }
     query_result
 }
@@ -226,6 +211,7 @@ impl PrepareCallback<Statement, PgTypeMetadata> for Arc<tokio_postgres::Client> 
             .iter()
             .map(type_from_oid)
             .collect::<QueryResult<Vec<_>>>()?;
+
         let stmt = self
             .prepare_typed(sql, &bind_types)
             .await
@@ -288,7 +274,7 @@ impl AsyncPgConnection {
             conn: Arc::new(conn),
             stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
             transaction_state: Arc::new(Mutex::new(AnsiTransactionManager::default())),
-            metadata_cache: Arc::new(Mutex::new(Some(PgMetadataCache::new()))),
+            metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
         };
         conn.set_config_options()
             .await
@@ -313,116 +299,131 @@ impl AsyncPgConnection {
         Ok(())
     }
 
-    async fn with_prepared_statement<'a, T, F, R>(
-        raw_connection: Arc<tokio_postgres::Client>,
-        stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
-        metadata_cache: Arc<Mutex<Option<PgMetadataCache>>>,
-        tm: Arc<Mutex<AnsiTransactionManager>>,
+    fn with_prepared_statement<'a, T, F, R>(
+        &mut self,
         query: T,
-        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
-    ) -> QueryResult<R>
+        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F + Send + 'a,
+    ) -> BoxFuture<'a, QueryResult<R>>
     where
-        T: QueryFragment<diesel::pg::Pg> + QueryId + Send,
-        F: Future<Output = QueryResult<R>>,
+        T: QueryFragment<diesel::pg::Pg> + QueryId,
+        F: Future<Output = QueryResult<R>> + Send,
+        R: Send,
     {
-        let mut bind_collector;
-        {
-            loop {
-                // we need a new bind collector per iteration here
-                bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
+        // we explicilty descruct the query here before going into the async block
+        //
+        // That's required to remove the send bound from `T` as we have translated
+        // the query type to just a string (for the SQL) and a bunch of bytes (for the binds)
+        // which both are `Send`.
+        // We also collect the query id (essentially an integer) and the safe_to_cache flag here
+        // so there is no need to even access the query in the async block below
+        let is_safe_to_cache_prepared = query.is_safe_to_cache_prepared(&diesel::pg::Pg);
+        let mut query_builder = PgQueryBuilder::default();
+        let sql = query
+            .to_sql(&mut query_builder, &Pg)
+            .map(|_| query_builder.finish());
 
-                let (res, unresolved_types) = {
-                    let mut metadata_cache_lock = metadata_cache.lock().await;
-                    let mut metadata_lookup =
-                        PgAsyncMetadataLookup::new(metadata_cache_lock.take().unwrap_or_default());
+        let mut bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
+        let query_id = T::query_id();
 
-                    let res = query.collect_binds(
-                        &mut bind_collector,
-                        &mut metadata_lookup,
-                        &diesel::pg::Pg,
-                    );
+        // we don't resolve custom types here yet, we do that later
+        // in the async block below as we might need to perform lookup
+        // queries for that.
+        //
+        // We apply this workaround to prevent requiring all the diesel
+        // serialization code to beeing async
+        let mut metadata_lookup = PgAsyncMetadataLookup::new();
+        let collect_bind_result =
+            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
 
-                    let PgAsyncMetadataLookup {
-                        unresolved_types,
-                        metadata_cache,
-                    } = metadata_lookup;
-                    *metadata_cache_lock = Some(metadata_cache);
-                    (res, unresolved_types)
-                };
+        let raw_connection = self.conn.clone();
+        let stmt_cache = self.stmt_cache.clone();
+        let metadata_cache = self.metadata_cache.clone();
+        let tm = self.transaction_state.clone();
 
-                if !unresolved_types.is_empty() {
-                    for (schema, lookup_type_name) in unresolved_types {
-                        // as this is an async call and we don't want to infect the whole diesel serialization
-                        // api with async we just error out in the `PgMetadataLookup` implementation below if we encounter
-                        // a type that is not cached yet
-                        // If that's the case we will do the lookup here and try again as the
-                        // type is now cached.
-                        let type_metadata =
-                            lookup_type(schema.clone(), lookup_type_name.clone(), &raw_connection)
-                                .await?;
-                        let mut metadata_cache_lock = metadata_cache.lock().await;
-                        let metadata_cache =
-                            if let Some(ref mut metadata_cache) = *metadata_cache_lock {
-                                metadata_cache
+        async move {
+            let sql = sql?;
+            let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
+            collect_bind_result?;
+            // Check whether we need to resolve some types at all
+            //
+            // If the user doesn't use custom types there is no need
+            // to borther with that at all
+            if !metadata_lookup.unresolved_types.is_empty() {
+                let metadata_cache = &mut *metadata_cache.lock().await;
+                let mut next_unresolved = metadata_lookup.unresolved_types.into_iter();
+                for m in &mut bind_collector.metadata {
+                    // for each unresolved item
+                    // we check whether it's arleady in the cache
+                    // or perform a lookup and insert it into the cache
+                    if m.oid().is_err() {
+                        if let Some((ref schema, ref lookup_type_name)) = next_unresolved.next() {
+                            let cache_key = PgMetadataCacheKey::new(
+                                schema.as_ref().map(Into::into),
+                                lookup_type_name.into(),
+                            );
+                            if let Some(entry) = metadata_cache.lookup_type(&cache_key) {
+                                *m = entry;
                             } else {
-                                *metadata_cache_lock = Some(Default::default());
-                                metadata_cache_lock.as_mut().expect("We set it above")
-                            };
+                                let type_metadata = lookup_type(
+                                    schema.clone(),
+                                    lookup_type_name.clone(),
+                                    &raw_connection,
+                                )
+                                .await?;
+                                *m = PgTypeMetadata::from_result(Ok(type_metadata));
 
-                        metadata_cache.store_type(
-                            PgMetadataCacheKey::new(
-                                schema.map(Cow::Owned),
-                                Cow::Owned(lookup_type_name),
-                            ),
-                            type_metadata,
-                        );
-                        // just try again to get the binds, now that we've inserted the
-                        // type into the lookup list
+                                metadata_cache.store_type(cache_key, type_metadata);
+                            }
+                        } else {
+                            break;
+                        }
                     }
-                } else {
-                    // bubble up any error as soon as we have done all lookups
-                    res?;
-                    break;
                 }
             }
+            let key = match query_id {
+                Some(id) => StatementCacheKey::Type(id),
+                None => StatementCacheKey::Sql {
+                    sql: sql.clone(),
+                    bind_types: bind_collector.metadata.clone(),
+                },
+            };
+            let stmt = {
+                let mut stmt_cache = stmt_cache.lock().await;
+                stmt_cache
+                    .cached_prepared_statement(
+                        key,
+                        sql,
+                        is_safe_to_cache_prepared,
+                        &bind_collector.metadata,
+                        raw_connection.clone(),
+                    )
+                    .await?
+                    .0
+                    .clone()
+            };
+
+            let binds = bind_collector
+                .metadata
+                .into_iter()
+                .zip(bind_collector.binds)
+                .map(|(meta, bind)| ToSqlHelper(meta, bind))
+                .collect::<Vec<_>>();
+            let res = callback(raw_connection, stmt.clone(), binds).await;
+            let mut tm = tm.lock().await;
+            update_transaction_manager_status(res, &mut tm)
         }
-
-        let stmt = {
-            let mut stmt_cache = stmt_cache.lock().await;
-            stmt_cache
-                .cached_prepared_statement(
-                    query,
-                    &bind_collector.metadata,
-                    raw_connection.clone(),
-                    &diesel::pg::Pg,
-                )
-                .await?
-                .0
-                .clone()
-        };
-
-        let binds = bind_collector
-            .metadata
-            .into_iter()
-            .zip(bind_collector.binds)
-            .map(|(meta, bind)| ToSqlHelper(meta, bind))
-            .collect::<Vec<_>>();
-        let res = callback(raw_connection, stmt.clone(), binds).await;
-        let mut tm = tm.lock().await;
-        update_transaction_manager_status(res, &mut tm)
+        .boxed()
     }
 }
 
 struct PgAsyncMetadataLookup {
     unresolved_types: Vec<(Option<String>, String)>,
-    metadata_cache: PgMetadataCache,
 }
 
 impl PgAsyncMetadataLookup {
-    fn new(metadata_cache: PgMetadataCache) -> Self {
+    fn new() -> Self {
         Self {
             unresolved_types: Vec::new(),
-            metadata_cache,
         }
     }
 }
@@ -432,14 +433,10 @@ impl PgMetadataLookup for PgAsyncMetadataLookup {
         let cache_key =
             PgMetadataCacheKey::new(schema.map(Cow::Borrowed), Cow::Borrowed(type_name));
 
-        if let Some(metadata) = self.metadata_cache.lookup_type(&cache_key) {
-            metadata
-        } else {
-            let cache_key = cache_key.into_owned();
-            self.unresolved_types
-                .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
-            PgTypeMetadata::from_result(Err(FailedToLookupTypeError::new(cache_key)))
-        }
+        let cache_key = cache_key.into_owned();
+        self.unresolved_types
+            .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
+        PgTypeMetadata::from_result(Err(FailedToLookupTypeError::new(cache_key)))
     }
 }
 
@@ -473,8 +470,19 @@ async fn lookup_type(
     Ok((r.get(0), r.get(1)))
 }
 
-#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
-impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {}
+#[cfg(any(
+    feature = "deadpool",
+    feature = "bb8",
+    feature = "mobc",
+    feature = "r2d2"
+))]
+impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {
+    type PingQuery = crate::pooled_connection::CheckConnectionQuery;
+
+    fn make_ping_query() -> Self::PingQuery {
+        crate::pooled_connection::CheckConnectionQuery
+    }
+}
 
 #[cfg(test)]
 pub mod tests {

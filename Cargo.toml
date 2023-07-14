@@ -13,11 +13,11 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.65.0"
 
 [dependencies]
-diesel = { version = "~2.1.0", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
+diesel = { version = "~2.1.1", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]}
 async-trait = "0.1.66"
 futures-channel = { version = "0.3.17", default-features = false, features = ["std", "sink"], optional = true }
 futures-util = { version = "0.3.17", default-features = false, features = ["std", "sink"] }
-tokio-postgres = { version = "0.7.2", optional = true}
+tokio-postgres = { version = "0.7.10", optional = true}
 tokio = { version = "1.26", optional = true}
 mysql_async = { version = ">=0.30.0,<0.33", optional = true}
 mysql_common = {version = ">=0.29.0,<0.31.0", optional = true}
@@ -31,12 +31,14 @@ scoped-futures = {version = "0.1", features = ["std"]}
 tokio = {version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"]}
 cfg-if = "1"
 chrono = "0.4"
-diesel = { version = "2.0.0", default-features = false,  features = ["chrono"]}
+diesel = { version = "2.1.0", default-features = false,  features = ["chrono"]}
 
 [features]
 default = []
-mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common", "futures-channel"]
+mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common", "futures-channel", "tokio"]
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
+async-connection-wrapper = []
+r2d2 = ["diesel/r2d2"]
 
 [[test]]
 name = "integration_tests"
@@ -54,3 +56,4 @@ members = [
         ".",
         "examples/postgres/pooled-with-rustls"
 ]
+

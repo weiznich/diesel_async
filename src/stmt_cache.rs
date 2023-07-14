@@ -3,7 +3,6 @@ use std::hash::Hash;
 
 use diesel::backend::Backend;
 use diesel::connection::statement_cache::{MaybeCached, PrepareForCache, StatementCacheKey};
-use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 
@@ -18,15 +17,13 @@ type PrepareFuture<'a, F, S> = future::Either<
 >;
 
 #[async_trait::async_trait]
-pub trait PrepareCallback<S, M> {
+pub trait PrepareCallback<S, M>: Sized {
     async fn prepare(
         self,
         sql: &str,
         metadata: &[M],
         is_for_cache: PrepareForCache,
-    ) -> QueryResult<(S, Self)>
-    where
-        Self: Sized;
+    ) -> QueryResult<(S, Self)>;
 }
 
 impl<S, DB: Backend> StmtCache<DB, S> {
@@ -36,39 +33,24 @@ impl<S, DB: Backend> StmtCache<DB, S> {
         }
     }
 
-    pub fn cached_prepared_statement<'a, T, F>(
+    pub fn cached_prepared_statement<'a, F>(
         &'a mut self,
-        query: T,
+        cache_key: StatementCacheKey<DB>,
+        sql: String,
+        is_query_safe_to_cache: bool,
         metadata: &[DB::TypeMetadata],
         prepare_fn: F,
-        backend: &DB,
     ) -> PrepareFuture<'a, F, S>
     where
         S: Send,
         DB::QueryBuilder: Default,
         DB::TypeMetadata: Clone + Send + Sync,
-        T: QueryFragment<DB> + QueryId + Send,
         F: PrepareCallback<S, DB::TypeMetadata> + Send + 'a,
         StatementCacheKey<DB>: Hash + Eq,
     {
         use std::collections::hash_map::Entry::{Occupied, Vacant};
 
-        let cache_key = match StatementCacheKey::for_source(&query, metadata, backend) {
-            Ok(key) => key,
-            Err(e) => return future::Either::Left(future::ready(Err(e))),
-        };
-
-        let is_query_safe_to_cache = match query.is_safe_to_cache_prepared(backend) {
-            Ok(is_safe_to_cache) => is_safe_to_cache,
-            Err(e) => return future::Either::Left(future::ready(Err(e))),
-        };
-
         if !is_query_safe_to_cache {
-            let sql = match cache_key.sql(&query, backend) {
-                Ok(sql) => sql.into_owned(),
-                Err(e) => return future::Either::Left(future::ready(Err(e))),
-            };
-
             let metadata = metadata.to_vec();
             let f = async move {
                 let stmt = prepare_fn
@@ -86,10 +68,6 @@ impl<S, DB: Backend> StmtCache<DB, S> {
                 prepare_fn,
             )))),
             Vacant(entry) => {
-                let sql = match entry.key().sql(&query, backend) {
-                    Ok(sql) => sql.into_owned(),
-                    Err(e) => return future::Either::Left(future::ready(Err(e))),
-                };
                 let metadata = metadata.to_vec();
                 let f = async move {
                     let statement = prepare_fn
