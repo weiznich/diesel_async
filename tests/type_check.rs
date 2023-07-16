@@ -67,6 +67,36 @@ async fn check_tiny_int() {
     type_check::<_, sql_types::TinyInt>(conn, -1_i8).await;
     type_check::<_, sql_types::TinyInt>(conn, i8::MIN).await;
     type_check::<_, sql_types::TinyInt>(conn, i8::MAX).await;
+
+    #[derive(QueryableByName, Debug)]
+    #[diesel(table_name = test_small)]
+    struct Test {
+        id: i8,
+    }
+
+    table!(test_small(id){
+        id -> TinyInt,
+    });
+
+    // test case for https://github.com/weiznich/diesel_async/issues/91
+    diesel::sql_query("drop table if exists test_small")
+        .execute(conn)
+        .await
+        .unwrap();
+    diesel::sql_query("create table test_small(id smallint primary key)")
+        .execute(conn)
+        .await
+        .unwrap();
+    diesel::sql_query("insert into test_small(id) values(-1)")
+        .execute(conn)
+        .await
+        .unwrap();
+    let got = diesel::sql_query("select id from test_small where id = ?")
+        .bind::<sql_types::TinyInt, _>(-1)
+        .load::<Test>(conn)
+        .await
+        .unwrap();
+    assert_eq!(got[0].id, -1);
 }
 
 #[cfg(feature = "mysql")]

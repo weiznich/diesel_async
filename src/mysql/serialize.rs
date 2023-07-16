@@ -12,7 +12,7 @@ pub(super) struct ToSqlHelper {
 fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> Value {
     match bind {
         Some(bind) => match metadata {
-            MysqlType::Tiny => Value::Int(bind[0] as _),
+            MysqlType::Tiny => Value::Int((bind[0] as i8) as i64),
             MysqlType::Short => Value::Int(i16::from_ne_bytes(bind.try_into().unwrap()) as _),
             MysqlType::Long => Value::Int(i32::from_ne_bytes(bind.try_into().unwrap()) as _),
             MysqlType::LongLong => Value::Int(i64::from_ne_bytes(bind.try_into().unwrap())),
