@@ -67,6 +67,14 @@ async fn check_tiny_int() {
     type_check::<_, sql_types::TinyInt>(conn, -1_i8).await;
     type_check::<_, sql_types::TinyInt>(conn, i8::MIN).await;
     type_check::<_, sql_types::TinyInt>(conn, i8::MAX).await;
+
+    // test case for https://github.com/weiznich/diesel_async/issues/91
+    let res = diesel::dsl::sql::<diesel::sql_types::Bool>("SELECT -1 = ")
+        .bind::<sql_types::TinyInt, _>(-1)
+        .get_result::<bool>(conn)
+        .await
+        .unwrap();
+    assert!(res);
 }
 
 #[cfg(feature = "mysql")]
