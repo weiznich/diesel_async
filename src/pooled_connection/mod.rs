@@ -257,8 +257,9 @@ pub trait PoolableConnection: AsyncConnection {
     /// if the connection is considered to be broken or not. See
     /// [ManageConnection::has_broken] for details.
     ///
-    /// The default implementation does not consider any connection as broken
-    fn is_broken(&self) -> bool {
-        false
+    /// The default implementation uses
+    /// [TransactionManager::is_broken_transaction_manager].
+    fn is_broken(&mut self) -> bool {
+        Self::TransactionManager::is_broken_transaction_manager(self)
     }
 }
