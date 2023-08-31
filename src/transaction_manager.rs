@@ -1,3 +1,7 @@
+use diesel::connection::TransactionManagerStatus;
+use diesel::connection::{
+    InTransactionStatus, TransactionDepthChange, ValidTransactionManagerStatus,
+};
 use diesel::result::Error;
 use diesel::QueryResult;
 use scoped_futures::ScopedBoxFuture;
@@ -88,6 +92,7 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
             // so we don't consider this connection broken
             Ok(ValidTransactionManagerStatus {
                 in_transaction: None,
+                ..
             }) => false,
             // The transaction manager is in an error state
             // Therefore we consider this connection broken
@@ -97,6 +102,7 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
             // if that transaction was not opened by `begin_test_transaction`
             Ok(ValidTransactionManagerStatus {
                 in_transaction: Some(s),
+                ..
             }) => !s.test_transaction,
         }
     }
@@ -109,144 +115,144 @@ pub struct AnsiTransactionManager {
     pub(crate) status: TransactionManagerStatus,
 }
 
-/// Status of the transaction manager
-#[derive(Debug)]
-pub enum TransactionManagerStatus {
-    /// Valid status, the manager can run operations
-    Valid(ValidTransactionManagerStatus),
-    /// Error status, probably following a broken connection. The manager will no longer run operations
-    InError,
-}
+// /// Status of the transaction manager
+// #[derive(Debug)]
+// pub enum TransactionManagerStatus {
+//     /// Valid status, the manager can run operations
+//     Valid(ValidTransactionManagerStatus),
+//     /// Error status, probably following a broken connection. The manager will no longer run operations
+//     InError,
+// }
 
-impl Default for TransactionManagerStatus {
-    fn default() -> Self {
-        TransactionManagerStatus::Valid(ValidTransactionManagerStatus::default())
-    }
-}
+// impl Default for TransactionManagerStatus {
+//     fn default() -> Self {
+//         TransactionManagerStatus::Valid(ValidTransactionManagerStatus::default())
+//     }
+// }
 
-impl TransactionManagerStatus {
-    /// Returns the transaction depth if the transaction manager's status is valid, or returns
-    /// [`Error::BrokenTransactionManager`] if the transaction manager is in error.
-    pub fn transaction_depth(&self) -> QueryResult<Option<NonZeroU32>> {
-        match self {
-            TransactionManagerStatus::Valid(valid_status) => Ok(valid_status.transaction_depth()),
-            TransactionManagerStatus::InError => Err(Error::BrokenTransactionManager),
-        }
-    }
+// impl TransactionManagerStatus {
+//     /// Returns the transaction depth if the transaction manager's status is valid, or returns
+//     /// [`Error::BrokenTransactionManager`] if the transaction manager is in error.
+//     pub fn transaction_depth(&self) -> QueryResult<Option<NonZeroU32>> {
+//         match self {
+//             TransactionManagerStatus::Valid(valid_status) => Ok(valid_status.transaction_depth()),
+//             TransactionManagerStatus::InError => Err(Error::BrokenTransactionManager),
+//         }
+//     }
 
-    /// If in transaction and transaction manager is not broken, registers that the
-    /// connection can not be used anymore until top-level transaction is rolled back
-    pub(crate) fn set_top_level_transaction_requires_rollback(&mut self) {
-        if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
-            in_transaction:
-                Some(InTransactionStatus {
-                    top_level_transaction_requires_rollback,
-                    ..
-                }),
-        }) = self
-        {
-            *top_level_transaction_requires_rollback = true;
-        }
-    }
+//     /// If in transaction and transaction manager is not broken, registers that the
+//     /// connection can not be used anymore until top-level transaction is rolled back
+//     pub(crate) fn set_top_level_transaction_requires_rollback(&mut self) {
+//         if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+//             in_transaction:
+//                 Some(InTransactionStatus {
+//                     top_level_transaction_requires_rollback,
+//                     ..
+//                 }),
+//         }) = self
+//         {
+//             *top_level_transaction_requires_rollback = true;
+//         }
+//     }
 
-    /// Sets the transaction manager status to InError
-    ///
-    /// Subsequent attempts to use transaction-related features will result in a
-    /// [`Error::BrokenTransactionManager`] error
-    pub fn set_in_error(&mut self) {
-        *self = TransactionManagerStatus::InError
-    }
+//     /// Sets the transaction manager status to InError
+//     ///
+//     /// Subsequent attempts to use transaction-related features will result in a
+//     /// [`Error::BrokenTransactionManager`] error
+//     pub fn set_in_error(&mut self) {
+//         *self = TransactionManagerStatus::InError
+//     }
 
-    fn transaction_state(&mut self) -> QueryResult<&mut ValidTransactionManagerStatus> {
-        match self {
-            TransactionManagerStatus::Valid(valid_status) => Ok(valid_status),
-            TransactionManagerStatus::InError => Err(Error::BrokenTransactionManager),
-        }
-    }
+//     fn transaction_state(&mut self) -> QueryResult<&mut ValidTransactionManagerStatus> {
+//         match self {
+//             TransactionManagerStatus::Valid(valid_status) => Ok(valid_status),
+//             TransactionManagerStatus::InError => Err(Error::BrokenTransactionManager),
+//         }
+//     }
 
-    pub(crate) fn set_test_transaction_flag(&mut self) {
-        if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
-            in_transaction: Some(s),
-        }) = self
-        {
-            s.test_transaction = true;
-        }
-    }
-}
+//     pub(crate) fn set_test_transaction_flag(&mut self) {
+//         if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+//             in_transaction: Some(s),
+//         }) = self
+//         {
+//             s.test_transaction = true;
+//         }
+//     }
+// }
 
-/// Valid transaction status for the manager. Can return the current transaction depth
-#[allow(missing_copy_implementations)]
-#[derive(Debug, Default)]
-pub struct ValidTransactionManagerStatus {
-    in_transaction: Option<InTransactionStatus>,
-}
+// /// Valid transaction status for the manager. Can return the current transaction depth
+// #[allow(missing_copy_implementations)]
+// #[derive(Debug, Default)]
+// pub struct ValidTransactionManagerStatus {
+//     in_transaction: Option<InTransactionStatus>,
+// }
 
-#[allow(missing_copy_implementations)]
-#[derive(Debug)]
-struct InTransactionStatus {
-    transaction_depth: NonZeroU32,
-    top_level_transaction_requires_rollback: bool,
-    test_transaction: bool,
-}
+// #[allow(missing_copy_implementations)]
+// #[derive(Debug)]
+// struct InTransactionStatus {
+//     transaction_depth: NonZeroU32,
+//     top_level_transaction_requires_rollback: bool,
+//     test_transaction: bool,
+// }
 
-impl ValidTransactionManagerStatus {
-    /// Return the current transaction depth
-    ///
-    /// This value is `None` if no current transaction is running
-    /// otherwise the number of nested transactions is returned.
-    pub fn transaction_depth(&self) -> Option<NonZeroU32> {
-        self.in_transaction.as_ref().map(|it| it.transaction_depth)
-    }
+// impl ValidTransactionManagerStatus {
+//     /// Return the current transaction depth
+//     ///
+//     /// This value is `None` if no current transaction is running
+//     /// otherwise the number of nested transactions is returned.
+//     pub fn transaction_depth(&self) -> Option<NonZeroU32> {
+//         self.in_transaction.as_ref().map(|it| it.transaction_depth)
+//     }
 
-    /// Update the transaction depth by adding the value of the `transaction_depth_change` parameter if the `query` is
-    /// `Ok(())`
-    pub fn change_transaction_depth(
-        &mut self,
-        transaction_depth_change: TransactionDepthChange,
-    ) -> QueryResult<()> {
-        match (&mut self.in_transaction, transaction_depth_change) {
-            (Some(in_transaction), TransactionDepthChange::IncreaseDepth) => {
-                // Can be replaced with saturating_add directly on NonZeroU32 once
-                // <https://github.com/rust-lang/rust/issues/84186> is stable
-                in_transaction.transaction_depth =
-                    NonZeroU32::new(in_transaction.transaction_depth.get().saturating_add(1))
-                        .expect("nz + nz is always non-zero");
-                Ok(())
-            }
-            (Some(in_transaction), TransactionDepthChange::DecreaseDepth) => {
-                // This sets `transaction_depth` to `None` as soon as we reach zero
-                match NonZeroU32::new(in_transaction.transaction_depth.get() - 1) {
-                    Some(depth) => in_transaction.transaction_depth = depth,
-                    None => self.in_transaction = None,
-                }
-                Ok(())
-            }
-            (None, TransactionDepthChange::IncreaseDepth) => {
-                self.in_transaction = Some(InTransactionStatus {
-                    transaction_depth: NonZeroU32::new(1).expect("1 is non-zero"),
-                    top_level_transaction_requires_rollback: false,
-                    test_transaction: false,
-                });
-                Ok(())
-            }
-            (None, TransactionDepthChange::DecreaseDepth) => {
-                // We screwed up something somewhere
-                // we cannot decrease the transaction count if
-                // we are not inside a transaction
-                Err(Error::NotInTransaction)
-            }
-        }
-    }
-}
+//     /// Update the transaction depth by adding the value of the `transaction_depth_change` parameter if the `query` is
+//     /// `Ok(())`
+//     pub fn change_transaction_depth(
+//         &mut self,
+//         transaction_depth_change: TransactionDepthChange,
+//     ) -> QueryResult<()> {
+//         match (&mut self.in_transaction, transaction_depth_change) {
+//             (Some(in_transaction), TransactionDepthChange::IncreaseDepth) => {
+//                 // Can be replaced with saturating_add directly on NonZeroU32 once
+//                 // <https://github.com/rust-lang/rust/issues/84186> is stable
+//                 in_transaction.transaction_depth =
+//                     NonZeroU32::new(in_transaction.transaction_depth.get().saturating_add(1))
+//                         .expect("nz + nz is always non-zero");
+//                 Ok(())
+//             }
+//             (Some(in_transaction), TransactionDepthChange::DecreaseDepth) => {
+//                 // This sets `transaction_depth` to `None` as soon as we reach zero
+//                 match NonZeroU32::new(in_transaction.transaction_depth.get() - 1) {
+//                     Some(depth) => in_transaction.transaction_depth = depth,
+//                     None => self.in_transaction = None,
+//                 }
+//                 Ok(())
+//             }
+//             (None, TransactionDepthChange::IncreaseDepth) => {
+//                 self.in_transaction = Some(InTransactionStatus {
+//                     transaction_depth: NonZeroU32::new(1).expect("1 is non-zero"),
+//                     top_level_transaction_requires_rollback: false,
+//                     test_transaction: false,
+//                 });
+//                 Ok(())
+//             }
+//             (None, TransactionDepthChange::DecreaseDepth) => {
+//                 // We screwed up something somewhere
+//                 // we cannot decrease the transaction count if
+//                 // we are not inside a transaction
+//                 Err(Error::NotInTransaction)
+//             }
+//         }
+//     }
+// }
 
-/// Represents a change to apply to the depth of a transaction
-#[derive(Debug, Clone, Copy)]
-pub enum TransactionDepthChange {
-    /// Increase the depth of the transaction (corresponds to `BEGIN` or `SAVEPOINT`)
-    IncreaseDepth,
-    /// Decreases the depth of the transaction (corresponds to `COMMIT`/`RELEASE SAVEPOINT` or `ROLLBACK`)
-    DecreaseDepth,
-}
+// /// Represents a change to apply to the depth of a transaction
+// #[derive(Debug, Clone, Copy)]
+// pub enum TransactionDepthChange {
+//     /// Increase the depth of the transaction (corresponds to `BEGIN` or `SAVEPOINT`)
+//     IncreaseDepth,
+//     /// Decreases the depth of the transaction (corresponds to `COMMIT`/`RELEASE SAVEPOINT` or `ROLLBACK`)
+//     DecreaseDepth,
+// }
 
 impl AnsiTransactionManager {
     fn get_transaction_state<Conn>(
@@ -305,40 +311,38 @@ where
     async fn rollback_transaction(conn: &mut Conn) -> QueryResult<()> {
         let transaction_state = Self::get_transaction_state(conn)?;
 
-        let rollback_sql = match transaction_state.in_transaction {
-            Some(ref mut in_transaction) => {
+        let (
+            (rollback_sql, rolling_back_top_level),
+            requires_rollback_maybe_up_to_top_level_before_execute,
+        ) = match transaction_state.in_transaction {
+            Some(ref in_transaction) => (
                 match in_transaction.transaction_depth.get() {
-                    1 => Cow::Borrowed("ROLLBACK"),
-                    depth_gt1 => {
-                        if in_transaction.top_level_transaction_requires_rollback {
-                            // There's no point in *actually* rolling back this one
-                            // because we won't be able to do anything until top-level
-                            // is rolled back.
-
-                            // To make it easier on the user (that they don't have to really look
-                            // at actual transaction depth and can just rely on the number of
-                            // times they have called begin/commit/rollback) we don't mark the
-                            // transaction manager as out of the savepoints as soon as we
-                            // realize there is that issue, but instead we still decrement here:
-                            in_transaction.transaction_depth = NonZeroU32::new(depth_gt1 - 1)
-                                .expect("Depth was checked to be > 1");
-                            return Ok(());
-                        } else {
-                            Cow::Owned(format!(
-                                "ROLLBACK TO SAVEPOINT diesel_savepoint_{}",
-                                depth_gt1 - 1
-                            ))
-                        }
-                    }
-                }
-            }
+                    1 => (Cow::Borrowed("ROLLBACK"), true),
+                    depth_gt1 => (
+                        Cow::Owned(format!(
+                            "ROLLBACK TO SAVEPOINT diesel_savepoint_{}",
+                            depth_gt1 - 1
+                        )),
+                        false,
+                    ),
+                },
+                in_transaction.requires_rollback_maybe_up_to_top_level,
+            ),
             None => return Err(Error::NotInTransaction),
         };
 
         match conn.batch_execute(&rollback_sql).await {
             Ok(()) => {
-                Self::get_transaction_state(conn)?
-                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)?;
+                match Self::get_transaction_state(conn)?
+                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
+                {
+                    Ok(()) => {}
+                    Err(Error::NotInTransaction) if rolling_back_top_level => {
+                        // Transaction exit may have already been detected by connection
+                        // implementation. It's fine.
+                    }
+                    Err(e) => return Err(e),
+                }
                 Ok(())
             }
             Err(rollback_error) => {
@@ -348,17 +352,35 @@ where
                         in_transaction:
                             Some(InTransactionStatus {
                                 transaction_depth,
-                                top_level_transaction_requires_rollback,
+                                requires_rollback_maybe_up_to_top_level,
                                 ..
                             }),
-                    }) if transaction_depth.get() > 1
-                        && !*top_level_transaction_requires_rollback =>
-                    {
+                        ..
+                    }) if transaction_depth.get() > 1 => {
                         // A savepoint failed to rollback - we may still attempt to repair
-                        // the connection by rolling back top-level transaction.
+                        // the connection by rolling back higher levels.
+
+                        // To make it easier on the user (that they don't have to really
+                        // look at actual transaction depth and can just rely on the number
+                        // of times they have called begin/commit/rollback) we still
+                        // decrement here:
                         *transaction_depth = NonZeroU32::new(transaction_depth.get() - 1)
                             .expect("Depth was checked to be > 1");
-                        *top_level_transaction_requires_rollback = true;
+                        *requires_rollback_maybe_up_to_top_level = true;
+                        if requires_rollback_maybe_up_to_top_level_before_execute {
+                            // In that case, we tolerate that savepoint releases fail
+                            // -> we should ignore errors
+                            return Ok(());
+                        }
+                    }
+                    TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+                        in_transaction: None,
+                        ..
+                    }) => {
+                        // we would have returned `NotInTransaction` if that was already the state
+                        // before we made our call
+                        // => Transaction manager status has been fixed by the underlying connection
+                        // so we don't need to set_in_error
                     }
                     _ => tm_status.set_in_error(),
                 }
@@ -375,53 +397,51 @@ where
     async fn commit_transaction(conn: &mut Conn) -> QueryResult<()> {
         let transaction_state = Self::get_transaction_state(conn)?;
         let transaction_depth = transaction_state.transaction_depth();
-        let commit_sql = match transaction_depth {
+        let (commit_sql, committing_top_level) = match transaction_depth {
             None => return Err(Error::NotInTransaction),
-            Some(transaction_depth) if transaction_depth.get() == 1 => Cow::Borrowed("COMMIT"),
-            Some(transaction_depth) => Cow::Owned(format!(
-                "RELEASE SAVEPOINT diesel_savepoint_{}",
-                transaction_depth.get() - 1
-            )),
+            Some(transaction_depth) if transaction_depth.get() == 1 => {
+                (Cow::Borrowed("COMMIT"), true)
+            }
+            Some(transaction_depth) => (
+                Cow::Owned(format!(
+                    "RELEASE SAVEPOINT diesel_savepoint_{}",
+                    transaction_depth.get() - 1
+                )),
+                false,
+            ),
         };
         match conn.batch_execute(&commit_sql).await {
             Ok(()) => {
-                Self::get_transaction_state(conn)?
-                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)?;
+                match Self::get_transaction_state(conn)?
+                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
+                {
+                    Ok(()) => {}
+                    Err(Error::NotInTransaction) if committing_top_level => {
+                        // Transaction exit may have already been detected by connection.
+                        // It's fine
+                    }
+                    Err(e) => return Err(e),
+                }
                 Ok(())
             }
             Err(commit_error) => {
                 if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
                     in_transaction:
                         Some(InTransactionStatus {
-                            ref mut transaction_depth,
-                            top_level_transaction_requires_rollback: true,
+                            requires_rollback_maybe_up_to_top_level: true,
                             ..
                         }),
+                    ..
                 }) = conn.transaction_state().status
                 {
-                    match transaction_depth.get() {
-                        1 => match Self::rollback_transaction(conn).await {
-                            Ok(()) => {}
-                            Err(rollback_error) => {
-                                conn.transaction_state().status.set_in_error();
-                                return Err(Error::RollbackErrorOnCommit {
-                                    rollback_error: Box::new(rollback_error),
-                                    commit_error: Box::new(commit_error),
-                                });
-                            }
-                        },
-                        depth_gt1 => {
-                            // There's no point in *actually* rolling back this one
-                            // because we won't be able to do anything until top-level
-                            // is rolled back.
-
-                            // To make it easier on the user (that they don't have to really look
-                            // at actual transaction depth and can just rely on the number of
-                            // times they have called begin/commit/rollback) we don't mark the
-                            // transaction manager as out of the savepoints as soon as we
-                            // realize there is that issue, but instead we still decrement here:
-                            *transaction_depth = NonZeroU32::new(depth_gt1 - 1)
-                                .expect("Depth was checked to be > 1");
+                    match Self::rollback_transaction(conn).await {
+                        Ok(()) => {}
+                        Err(rollback_error) => {
+                            conn.transaction_state().status.set_in_error();
+                            return Err(Error::RollbackErrorOnCommit {
+                                rollback_error: Box::new(rollback_error),
+                                commit_error: Box::new(commit_error),
+                            });
                         }
                     }
                 }

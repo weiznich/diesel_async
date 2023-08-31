@@ -8,6 +8,7 @@
 use crate::{AsyncConnection, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
+use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 use std::fmt;
@@ -132,10 +133,9 @@ where
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
-        T: diesel::query_builder::AsQuery + Send + 'query,
+        T: diesel::query_builder::AsQuery + 'query,
         T::Query: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
-            + Send
             + 'query,
     {
         let conn = self.deref_mut();
@@ -149,7 +149,6 @@ where
     where
         T: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
-            + Send
             + 'query,
     {
         let conn = self.deref_mut();
@@ -195,13 +194,17 @@ where
 
     fn transaction_manager_status_mut(
         conn: &mut C,
-    ) -> &mut crate::transaction_manager::TransactionManagerStatus {
+    ) -> &mut diesel::connection::TransactionManagerStatus {
         TM::transaction_manager_status_mut(&mut **conn)
+    }
+
+    fn is_broken_transaction_manager(conn: &mut C) -> bool {
+        TM::is_broken_transaction_manager(&mut **conn)
     }
 }
 
 #[async_trait::async_trait]
-impl<'b, Changes, Output, Conn> UpdateAndFetchResults<Changes, Output> for Conn
+impl<Changes, Output, Conn> UpdateAndFetchResults<Changes, Output> for Conn
 where
     Conn: DerefMut + Send,
     Changes: diesel::prelude::Identifiable + HasTable + Send,
@@ -215,8 +218,9 @@ where
     }
 }
 
+#[doc(hidden)]
 #[derive(diesel::query_builder::QueryId)]
-struct CheckConnectionQuery;
+pub struct CheckConnectionQuery;
 
 impl<DB> diesel::query_builder::QueryFragment<DB> for CheckConnectionQuery
 where
@@ -240,6 +244,10 @@ impl<C> diesel::query_dsl::RunQueryDsl<C> for CheckConnectionQuery {}
 #[doc(hidden)]
 #[async_trait::async_trait]
 pub trait PoolableConnection: AsyncConnection {
+    type PingQuery: QueryFragment<Self::Backend> + QueryId + Send;
+
+    fn make_ping_query() -> Self::PingQuery;
+
     /// Check if a connection is still valid
     ///
     /// The default implementation performs a `SELECT 1` query
@@ -248,7 +256,7 @@ pub trait PoolableConnection: AsyncConnection {
         for<'a> Self: 'a,
     {
         use crate::RunQueryDsl;
-        CheckConnectionQuery.execute(self).await.map(|_| ())
+        Self::make_ping_query().execute(self).await.map(|_| ())
     }
 
     /// Checks if the connection is broken and should not be reused

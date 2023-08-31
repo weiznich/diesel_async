@@ -191,6 +191,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// #
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #     run_test().await;
@@ -245,6 +247,9 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// #
+    /// use diesel_async::{RunQueryDsl, AsyncConnection};
+    ///
+    /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #     run_test().await;
@@ -266,6 +271,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -292,6 +299,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #
     /// #[derive(Queryable, PartialEq, Debug)]
     /// struct User {
@@ -364,6 +373,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// #
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #     run_test().await;
@@ -391,6 +402,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
+    /// use diesel_async::RunQueryDsl;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -424,6 +436,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// #
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #[derive(Queryable, PartialEq, Debug)]
     /// struct User {
     ///     id: i32,
@@ -482,6 +496,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -577,6 +593,8 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
+    /// use diesel_async::RunQueryDsl;
+    ///
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -634,6 +652,8 @@ impl<T, Conn> RunQueryDsl<Conn> for T {}
 /// # include!("../doctest_setup.rs");
 /// # use schema::animals;
 /// #
+/// use diesel_async::{SaveChangesDsl, AsyncConnection};
+///
 /// #[derive(Queryable, Debug, PartialEq)]
 /// struct Animal {
 ///    id: i32,

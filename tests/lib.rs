@@ -1,5 +1,5 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
-use diesel::{sql_function, QueryResult};
+use diesel::QueryResult;
 use diesel_async::*;
 use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
@@ -9,6 +9,8 @@ use std::pin::Pin;
 mod custom_types;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
+#[cfg(feature = "async-connection-wrapper")]
+mod sync_wrapper;
 mod type_check;
 
 async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
@@ -121,7 +123,7 @@ async fn setup(connection: &mut TestConnection) {
 }
 
 #[cfg(feature = "postgres")]
-sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
+diesel::sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
 
 #[cfg(feature = "postgres")]
 #[tokio::test]

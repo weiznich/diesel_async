@@ -6,7 +6,7 @@
 //! use futures_util::FutureExt;
 //! use diesel_async::pooled_connection::AsyncDieselConnectionManager;
 //! use diesel_async::pooled_connection::bb8::Pool;
-//! use diesel_async::RunQueryDsl;
+//! use diesel_async::{RunQueryDsl, AsyncConnection};
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
@@ -33,7 +33,6 @@
 //! let pool = Pool::builder().build(config).await?;
 //! let mut conn = pool.get().await?;
 //! # conn.begin_test_transaction();
-//! # clear_tables(&mut conn).await;
 //! # create_tables(&mut conn).await;
 //! # #[cfg(feature = "mysql")]
 //! # conn.begin_test_transaction();

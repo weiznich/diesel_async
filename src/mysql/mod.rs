@@ -1,13 +1,14 @@
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
-use diesel::connection::statement_cache::MaybeCached;
-use diesel::mysql::{Mysql, MysqlType};
+use diesel::connection::statement_cache::{MaybeCached, StatementCacheKey};
+use diesel::mysql::{Mysql, MysqlQueryBuilder, MysqlType};
+use diesel::query_builder::QueryBuilder;
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
 use diesel::QueryResult;
-use futures_util::future::{self, BoxFuture};
+use futures_util::future::BoxFuture;
 use futures_util::stream::{self, BoxStream};
-use futures_util::{Future, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures_util::{Future, FutureExt, StreamExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Opts, OptsBuilder, Statement};
 
@@ -69,10 +70,9 @@ impl AsyncConnection for AsyncMysqlConnection {
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
-        T: diesel::query_builder::AsQuery + Send,
+        T: diesel::query_builder::AsQuery,
         T::Query: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
-            + Send
             + 'query,
     {
         self.with_prepared_statement(source.as_query(), |conn, stmt, binds| async move {
@@ -126,7 +126,6 @@ impl AsyncConnection for AsyncMysqlConnection {
     where
         T: diesel::query_builder::QueryFragment<Self::Backend>
             + diesel::query_builder::QueryId
-            + Send
             + 'query,
     {
         self.with_prepared_statement(source, |conn, stmt, binds| async move {
@@ -166,7 +165,7 @@ fn update_transaction_manager_status<T>(
     {
         transaction_manager
             .status
-            .set_top_level_transaction_requires_rollback()
+            .set_requires_rollback_maybe_up_to_top_level(true)
     }
     query_result
 }
@@ -216,16 +215,13 @@ impl AsyncMysqlConnection {
     ) -> BoxFuture<'conn, QueryResult<R>>
     where
         R: Send + 'conn,
-        T: QueryFragment<Mysql> + QueryId + Send,
+        T: QueryFragment<Mysql> + QueryId,
         F: Future<Output = QueryResult<R>> + Send,
     {
         let mut bind_collector = RawBytesBindCollector::<Mysql>::new();
-        if let Err(e) = query.collect_binds(&mut bind_collector, &mut (), &Mysql) {
-            return future::ready(Err(e)).boxed();
-        }
-
-        let binds = bind_collector.binds;
-        let metadata = bind_collector.metadata;
+        let bind_collector = query
+            .collect_binds(&mut bind_collector, &mut (), &Mysql)
+            .map(|()| bind_collector);
 
         let AsyncMysqlConnection {
             ref mut conn,
@@ -234,14 +230,40 @@ impl AsyncMysqlConnection {
             ..
         } = self;
 
-        let stmt = stmt_cache.cached_prepared_statement(query, &metadata, conn, &Mysql);
+        let is_safe_to_cache_prepared = query.is_safe_to_cache_prepared(&Mysql);
+        let mut qb = MysqlQueryBuilder::new();
+        let sql = query.to_sql(&mut qb, &Mysql).map(|()| qb.finish());
+        let query_id = T::query_id();
 
-        stmt.and_then(|(stmt, conn)| async move {
+        async move {
+            let RawBytesBindCollector {
+                metadata, binds, ..
+            } = bind_collector?;
+            let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
+            let sql = sql?;
+            let cache_key = if let Some(query_id) = query_id {
+                StatementCacheKey::Type(query_id)
+            } else {
+                StatementCacheKey::Sql {
+                    sql: sql.clone(),
+                    bind_types: metadata.clone(),
+                }
+            };
+
+            let (stmt, conn) = stmt_cache
+                .cached_prepared_statement(
+                    cache_key,
+                    sql,
+                    is_safe_to_cache_prepared,
+                    &metadata,
+                    conn,
+                )
+                .await?;
             update_transaction_manager_status(
                 callback(conn, stmt, ToSqlHelper { metadata, binds }).await,
                 transaction_manager,
             )
-        })
+        }
         .boxed()
     }
 
@@ -279,8 +301,19 @@ impl AsyncMysqlConnection {
     }
 }
 
-#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
-impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {}
+#[cfg(any(
+    feature = "deadpool",
+    feature = "bb8",
+    feature = "mobc",
+    feature = "r2d2"
+))]
+impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {
+    type PingQuery = crate::pooled_connection::CheckConnectionQuery;
+
+    fn make_ping_query() -> Self::PingQuery {
+        crate::pooled_connection::CheckConnectionQuery
+    }
+}
 
 #[cfg(test)]
 mod tests {

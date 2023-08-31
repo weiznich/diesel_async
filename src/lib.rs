@@ -78,11 +78,18 @@ use std::fmt::Debug;
 pub use scoped_futures;
 use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 
+#[cfg(feature = "async-connection-wrapper")]
+pub mod async_connection_wrapper;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
 pub mod pg;
-#[cfg(any(feature = "deadpool", feature = "bb8", feature = "mobc"))]
+#[cfg(any(
+    feature = "deadpool",
+    feature = "bb8",
+    feature = "mobc",
+    feature = "r2d2"
+))]
 pub mod pooled_connection;
 mod run_query_dsl;
 mod stmt_cache;
@@ -98,9 +105,7 @@ pub use self::pg::AsyncPgConnection;
 pub use self::run_query_dsl::*;
 
 #[doc(inline)]
-pub use self::transaction_manager::{
-    AnsiTransactionManager, TransactionManager, TransactionManagerStatus,
-};
+pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 
 /// Perform simple operations on a backend.
 ///
@@ -187,6 +192,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// # include!("doctest_setup.rs");
     /// use diesel::result::Error;
     /// use scoped_futures::ScopedFutureExt;
+    /// use diesel_async::{RunQueryDsl, AsyncConnection};
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -240,7 +246,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// tests. Panics if called while inside of a transaction or
     /// if called with a connection containing a broken transaction
     async fn begin_test_transaction(&mut self) -> QueryResult<()> {
-        use crate::transaction_manager::TransactionManagerStatus;
+        use diesel::connection::TransactionManagerStatus;
 
         match Self::TransactionManager::transaction_manager_status_mut(self) {
             TransactionManagerStatus::Valid(valid_status) => {
@@ -266,6 +272,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// # include!("doctest_setup.rs");
     /// use diesel::result::Error;
     /// use scoped_futures::ScopedFutureExt;
+    /// use diesel_async::{RunQueryDsl, AsyncConnection};
     ///
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -319,8 +326,8 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     #[doc(hidden)]
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
-        T: AsQuery + Send + 'query,
-        T::Query: QueryFragment<Self::Backend> + QueryId + Send + 'query;
+        T: AsQuery + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + 'query;
 
     #[doc(hidden)]
     fn execute_returning_count<'conn, 'query, T>(
@@ -328,7 +335,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
         source: T,
     ) -> Self::ExecuteFuture<'conn, 'query>
     where
-        T: QueryFragment<Self::Backend> + QueryId + Send + 'query;
+        T: QueryFragment<Self::Backend> + QueryId + 'query;
 
     #[doc(hidden)]
     fn transaction_state(

@@ -1,33 +1,37 @@
-use diesel_async::*;
-use diesel::prelude::*;
+#[allow(unused_imports)]
+use diesel::prelude::{
+    AsChangeset, ExpressionMethods, Identifiable, IntoSql, QueryDsl, QueryResult, Queryable,
+    QueryableByName,
+};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "postgres")] {
+        use diesel_async::AsyncPgConnection;
         #[allow(dead_code)]
         type DB = diesel::pg::Pg;
+        #[allow(dead_code)]
+        type DbConnection = AsyncPgConnection;
+
+        fn database_url() -> String {
+            database_url_from_env("PG_DATABASE_URL")
+        }
 
         async fn connection_no_transaction() -> AsyncPgConnection {
-            let connection_url = database_url_from_env("PG_DATABASE_URL");
+            use diesel_async::AsyncConnection;
+            let connection_url = database_url();
             AsyncPgConnection::establish(&connection_url).await.unwrap()
         }
 
-        async fn clear_tables(connection: &mut AsyncPgConnection) {
-            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(connection).await.unwrap();
-        }
-
         async fn connection_no_data() -> AsyncPgConnection {
+            use diesel_async::AsyncConnection;
             let mut connection = connection_no_transaction().await;
             connection.begin_test_transaction().await.unwrap();
-            clear_tables(&mut connection).await;
             connection
         }
 
         async fn create_tables(connection: &mut AsyncPgConnection) {
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS users (
+            use diesel_async::RunQueryDsl;
+            diesel::sql_query("CREATE TEMPORARY TABLE users (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR NOT NULL
             )").execute(connection).await.unwrap();
@@ -36,7 +40,7 @@ cfg_if::cfg_if! {
             ).execute(connection).await.unwrap();
 
             diesel::sql_query(
-                "CREATE TABLE IF NOT EXISTS animals (
+                "CREATE TEMPORARY TABLE animals (
                 id SERIAL PRIMARY KEY,
                 species VARCHAR NOT NULL,
                 legs INTEGER NOT NULL,
@@ -50,7 +54,7 @@ cfg_if::cfg_if! {
              .await.unwrap();
 
             diesel::sql_query(
-                "CREATE TABLE IF NOT EXISTS posts (
+                "CREATE TEMPORARY TABLE posts (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 title VARCHAR NOT NULL
@@ -61,7 +65,7 @@ cfg_if::cfg_if! {
                 (1, 'About Rust'),
                 (2, 'My first post too')").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS comments (
+            diesel::sql_query("CREATE TEMPORARY TABLE comments (
                 id SERIAL PRIMARY KEY,
                 post_id INTEGER NOT NULL,
                 body VARCHAR NOT NULL
@@ -71,7 +75,7 @@ cfg_if::cfg_if! {
                 (2, 'Yay! I am learning Rust'),
                 (3, 'I enjoyed your post')").execute(connection).await.unwrap();
 
-            diesel::sql_query("CREATE TABLE IF NOT EXISTS brands (
+            diesel::sql_query("CREATE TEMPORARY TABLE brands (
                 id SERIAL PRIMARY KEY,
                 color VARCHAR NOT NULL DEFAULT 'Green',
                 accent VARCHAR DEFAULT 'Blue'
@@ -85,28 +89,26 @@ cfg_if::cfg_if! {
             connection
         }
     }  else if #[cfg(feature = "mysql")] {
+        use diesel_async::AsyncMysqlConnection;
         #[allow(dead_code)]
         type DB = diesel::mysql::Mysql;
+        #[allow(dead_code)]
+        type DbConnection = AsyncMysqlConnection;
 
-        async fn clear_tables(connection: &mut AsyncMysqlConnection) {
-            diesel::sql_query("SET FOREIGN_KEY_CHECKS=0;").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS users CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS animals CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS posts CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS comments CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("DROP TABLE IF EXISTS brands CASCADE").execute(connection).await.unwrap();
-            diesel::sql_query("SET FOREIGN_KEY_CHECKS=1;").execute(connection).await.unwrap();
+        fn database_url() -> String {
+            database_url_from_env("MYSQL_UNIT_TEST_DATABASE_URL")
         }
 
         async fn connection_no_data() -> AsyncMysqlConnection {
-            let connection_url = database_url_from_env("MYSQL_UNIT_TEST_DATABASE_URL");
-            let mut connection = AsyncMysqlConnection::establish(&connection_url).await.unwrap();
-            clear_tables(&mut connection).await;
-            connection
+            use diesel_async::AsyncConnection;
+            let connection_url = database_url();
+            AsyncMysqlConnection::establish(&connection_url).await.unwrap()
         }
 
         async fn create_tables(connection: &mut AsyncMysqlConnection) {
-               diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS users (
+            use diesel_async::RunQueryDsl;
+            use diesel_async::AsyncConnection;
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTO_INCREMENT,
                 name TEXT NOT NULL
             ) CHARACTER SET utf8mb4").execute(connection).await.unwrap();
@@ -172,8 +174,6 @@ cfg_if::cfg_if! {
 
 fn database_url_from_env(backend_specific_env_var: &str) -> String {
     use std::env;
-
-    //dotenv().ok();
 
     env::var(backend_specific_env_var)
         .or_else(|_| env::var("DATABASE_URL"))
