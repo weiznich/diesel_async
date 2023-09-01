@@ -41,6 +41,7 @@
 //! ```
 use super::{AsyncDieselConnectionManager, PoolableConnection};
 use deadpool::managed::Manager;
+use diesel::query_builder::QueryFragment;
 
 /// Type alias for using [`deadpool::managed::Pool`] with [`diesel-async`]
 pub type Pool<C> = deadpool::managed::Pool<AsyncDieselConnectionManager<C>>;
@@ -63,13 +64,16 @@ pub type HookErrorCause = deadpool::managed::HookErrorCause<super::PoolError>;
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + Send + 'static,
+    diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        crate::methods::ExecuteDsl<C>,
+    diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {
     type Type = C;
 
     type Error = super::PoolError;
 
     async fn create(&self) -> Result<Self::Type, Self::Error> {
-        (self.setup)(&self.connection_url)
+        (self.manager_config.custom_setup)(&self.connection_url)
             .await
             .map_err(super::PoolError::ConnectionError)
     }
@@ -80,7 +84,9 @@ where
                 "Broken connection",
             ));
         }
-        obj.ping().await.map_err(super::PoolError::QueryError)?;
+        obj.ping(&self.manager_config.recycling_method)
+            .await
+            .map_err(super::PoolError::QueryError)?;
         Ok(())
     }
 }

@@ -8,9 +8,9 @@
 use crate::{AsyncConnection, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
-use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::DerefMut;
 
@@ -42,8 +42,73 @@ impl fmt::Display for PoolError {
 
 impl std::error::Error for PoolError {}
 
-type SetupCallback<C> =
+/// Type of the custom setup closure passed to [`ManagerConfig::custom_setup`]
+pub type SetupCallback<C> =
     Box<dyn Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>;
+
+/// Type of the recycle check callback for the [`RecyclingMethod::CustomFunction`] variant
+pub type RecycleCheckCallback<C> =
+    dyn Fn(&mut C) -> future::BoxFuture<QueryResult<()>> + Send + Sync;
+
+/// Possible methods of how a connection is recycled.
+#[derive(Default)]
+pub enum RecyclingMethod<C> {
+    /// Only check for open transactions when recycling existing connections
+    /// Unless you have special needs this is a safe choice.
+    ///
+    /// If the database connection is closed you will recieve an error on the first place
+    /// you actually try to use the connection
+    Fast,
+    /// In addition to checking for open transactions a test query is executed
+    ///
+    /// This is slower, but guarantees that the database connection is ready to be used.
+    #[default]
+    Verified,
+    /// Like `Verified` but with a custom query
+    CustomQuery(Cow<'static, str>),
+    /// Like `Verified` but with a custom callback that allows to perform more checks
+    ///
+    /// The connection is only recycled if the callback returns `Ok(())`
+    CustomFunction(Box<RecycleCheckCallback<C>>),
+}
+
+impl<C: fmt::Debug> fmt::Debug for RecyclingMethod<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fast => write!(f, "Fast"),
+            Self::Verified => write!(f, "Verified"),
+            Self::CustomQuery(arg0) => f.debug_tuple("CustomQuery").field(arg0).finish(),
+            Self::CustomFunction(_) => f.debug_tuple("CustomFunction").finish(),
+        }
+    }
+}
+
+/// Configuration object for a Manager.
+///
+/// This currently only makes it possible to specify which [`RecyclingMethod`]
+/// should be used when retrieving existing objects from the [`Pool`].
+pub struct ManagerConfig<C> {
+    /// Method of how a connection is recycled. See [RecyclingMethod].
+    pub recycling_method: RecyclingMethod<C>,
+    /// Construct a new connection manger
+    /// with a custom setup procedure
+    ///
+    /// This can be used to for example establish a SSL secured
+    /// postgres connection
+    pub custom_setup: SetupCallback<C>,
+}
+
+impl<C> Default for ManagerConfig<C>
+where
+    C: AsyncConnection + 'static,
+{
+    fn default() -> Self {
+        Self {
+            recycling_method: Default::default(),
+            custom_setup: Box::new(|url| C::establish(url).boxed()),
+        }
+    }
+}
 
 /// An connection manager for use with diesel-async.
 ///
@@ -52,8 +117,8 @@ type SetupCallback<C> =
 /// * [bb8](self::bb8)
 /// * [mobc](self::mobc)
 pub struct AsyncDieselConnectionManager<C> {
-    setup: SetupCallback<C>,
     connection_url: String,
+    manager_config: ManagerConfig<C>,
 }
 
 impl<C> fmt::Debug for AsyncDieselConnectionManager<C> {
@@ -66,28 +131,31 @@ impl<C> fmt::Debug for AsyncDieselConnectionManager<C> {
     }
 }
 
-impl<C> AsyncDieselConnectionManager<C> {
+impl<C> AsyncDieselConnectionManager<C>
+where
+    C: AsyncConnection + 'static,
+{
     /// Returns a new connection manager,
     /// which establishes connections to the given database URL.
+    #[must_use]
     pub fn new(connection_url: impl Into<String>) -> Self
     where
         C: AsyncConnection + 'static,
     {
-        Self::new_with_setup(connection_url, |url| C::establish(url).boxed())
+        Self::new_with_config(connection_url, Default::default())
     }
 
-    /// Construct a new connection manger
-    /// with a custom setup procedure
-    ///
-    /// This can be used to for example establish a SSL secured
-    /// postgres connection
-    pub fn new_with_setup(
+    /// Returns a new connection manager,
+    /// which establishes connections with the given database URL
+    /// and that uses the specified configuration
+    #[must_use]
+    pub fn new_with_config(
         connection_url: impl Into<String>,
-        setup: impl Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync + 'static,
+        manager_config: ManagerConfig<C>,
     ) -> Self {
         Self {
-            setup: Box::new(setup),
             connection_url: connection_url.into(),
+            manager_config,
         }
     }
 }
@@ -218,9 +286,8 @@ where
     }
 }
 
-#[doc(hidden)]
 #[derive(diesel::query_builder::QueryId)]
-pub struct CheckConnectionQuery;
+struct CheckConnectionQuery;
 
 impl<DB> diesel::query_builder::QueryFragment<DB> for CheckConnectionQuery
 where
@@ -244,19 +311,34 @@ impl<C> diesel::query_dsl::RunQueryDsl<C> for CheckConnectionQuery {}
 #[doc(hidden)]
 #[async_trait::async_trait]
 pub trait PoolableConnection: AsyncConnection {
-    type PingQuery: QueryFragment<Self::Backend> + QueryId + Send;
-
-    fn make_ping_query() -> Self::PingQuery;
-
     /// Check if a connection is still valid
     ///
-    /// The default implementation performs a `SELECT 1` query
-    async fn ping(&mut self) -> diesel::QueryResult<()>
+    /// The default implementation will perform a check based on the provided
+    /// recycling method variant
+    async fn ping(&mut self, config: &RecyclingMethod<Self>) -> diesel::QueryResult<()>
     where
         for<'a> Self: 'a,
+        diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+            crate::methods::ExecuteDsl<Self>,
+        diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<Self>,
     {
-        use crate::RunQueryDsl;
-        Self::make_ping_query().execute(self).await.map(|_| ())
+        use crate::run_query_dsl::RunQueryDsl;
+        use diesel::IntoSql;
+
+        match config {
+            RecyclingMethod::Fast => Ok(()),
+            RecyclingMethod::Verified => {
+                diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
+                    .execute(self)
+                    .await
+                    .map(|_| ())
+            }
+            RecyclingMethod::CustomQuery(query) => diesel::sql_query(query.as_ref())
+                .execute(self)
+                .await
+                .map(|_| ()),
+            RecyclingMethod::CustomFunction(c) => c(self).await,
+        }
     }
 
     /// Checks if the connection is broken and should not be reused

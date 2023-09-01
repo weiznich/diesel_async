@@ -7,6 +7,8 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 ## Unreleased
 
 * Add a `AsyncConnectionWrapper` type to turn a `diesel_async::AsyncConnection` into a `diesel::Connection`. This might be used to execute migrations via `diesel_migrations`. 
+* Add some connection pool configurations to specify how connections
+in the pool should be checked if they are still valid
 
 ## [0.3.2] - 2023-07-24
 
@@ -56,3 +58,5 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 [0.2.1]: https://github.com/weiznich/diesel_async/compare/v0.2.0...v0.2.1
 [0.2.2]: https://github.com/weiznich/diesel_async/compare/v0.2.1...v0.2.2
 [0.3.0]: https://github.com/weiznich/diesel_async/compare/v0.2.0...v0.3.0
+[0.3.1]: https://github.com/weiznich/diesel_async/compare/v0.3.0...v0.3.1
+[0.3.2]: https://github.com/weiznich/diesel_async/compare/v0.3.1...v0.3.2

@@ -307,13 +307,7 @@ impl AsyncMysqlConnection {
     feature = "mobc",
     feature = "r2d2"
 ))]
-impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {
-    type PingQuery = crate::pooled_connection::CheckConnectionQuery;
-
-    fn make_ping_query() -> Self::PingQuery {
-        crate::pooled_connection::CheckConnectionQuery
-    }
-}
+impl crate::pooled_connection::PoolableConnection for AsyncMysqlConnection {}
 
 #[cfg(test)]
 mod tests {

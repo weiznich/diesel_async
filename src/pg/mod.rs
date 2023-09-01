@@ -477,10 +477,10 @@ async fn lookup_type(
     feature = "r2d2"
 ))]
 impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {
-    type PingQuery = crate::pooled_connection::CheckConnectionQuery;
+    fn is_broken(&mut self) -> bool {
+        use crate::TransactionManager;
 
-    fn make_ping_query() -> Self::PingQuery {
-        crate::pooled_connection::CheckConnectionQuery
+        Self::TransactionManager::is_broken_transaction_manager(self) || self.conn.is_closed()
     }
 }
 
