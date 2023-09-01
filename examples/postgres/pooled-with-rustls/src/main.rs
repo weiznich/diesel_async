@@ -11,10 +11,8 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::var("DATABASE_URL").expect("Env var `DATABASE_URL` not set");
 
-    let config = ManagerConfig {
-        custom_setup: Box::new(establish_connection),
-        ..ManagerConfig::default()
-    };
+    let mut config = ManagerConfig::default();
+    config.custom_setup = Box::new(establish_connection);
 
     // First we have to construct a connection manager with our custom `establish_connection`
     // function

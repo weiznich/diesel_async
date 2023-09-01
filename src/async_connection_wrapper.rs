@@ -30,7 +30,7 @@ pub trait BlockOn {
     fn get_runtime() -> Self;
 }
 
-/// A helper type that wraps an [`crate::AsyncConnectionWrapper`] to
+/// A helper type that wraps an [`AsyncConnection`][crate::AsyncConnection] to
 /// provide a sync [`diesel::Connection`] implementation.
 ///
 /// Internally this wrapper type will use `block_on` to wait for

@@ -85,8 +85,10 @@ impl<C: fmt::Debug> fmt::Debug for RecyclingMethod<C> {
 
 /// Configuration object for a Manager.
 ///
-/// This currently only makes it possible to specify which [`RecyclingMethod`]
-/// should be used when retrieving existing objects from the [`Pool`].
+/// This makes it possible to specify which [`RecyclingMethod`]
+/// should be used when retrieving existing objects from the `Pool`
+/// and it allows to provide a custom setup function.
+#[non_exhaustive]
 pub struct ManagerConfig<C> {
     /// Method of how a connection is recycled. See [RecyclingMethod].
     pub recycling_method: RecyclingMethod<C>,
