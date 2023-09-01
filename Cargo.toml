@@ -32,6 +32,7 @@ tokio = {version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"]}
 cfg-if = "1"
 chrono = "0.4"
 diesel = { version = "2.1.0", default-features = false,  features = ["chrono"]}
+diesel_migrations = "2.1.0"
 
 [features]
 default = []

@@ -1,3 +1,4 @@
+use diesel::migration::Migration;
 use diesel::prelude::*;
 use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
 
@@ -23,4 +24,16 @@ async fn test_sync_wrapper_under_runtime() {
     })
     .await
     .unwrap();
+}
+
+#[test]
+fn check_run_migration() {
+    use diesel_migrations::MigrationHarness;
+
+    let db_url = std::env::var("DATABASE_URL").unwrap();
+    let migrations: Vec<Box<dyn Migration<crate::TestBackend>>> = Vec::new();
+    let mut conn = AsyncConnectionWrapper::<crate::TestConnection>::establish(&db_url).unwrap();
+
+    // just use `run_migrations` here because that's the easiest one without additional setup
+    conn.run_migrations(&migrations).unwrap();
 }

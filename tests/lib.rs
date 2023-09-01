@@ -92,6 +92,9 @@ type TestConnection = AsyncMysqlConnection;
 #[cfg(feature = "postgres")]
 type TestConnection = AsyncPgConnection;
 
+#[allow(dead_code)]
+type TestBackend = <TestConnection as AsyncConnection>::Backend;
+
 #[tokio::test]
 async fn test_basic_insert_and_load() -> QueryResult<()> {
     let conn = &mut connection().await;

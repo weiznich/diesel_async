@@ -100,6 +100,8 @@ pub type AsyncConnectionWrapper<C, B = self::implementation::Tokio> =
 pub use self::implementation::AsyncConnectionWrapper;
 
 mod implementation {
+    use diesel::connection::SimpleConnection;
+
     use super::*;
 
     pub struct AsyncConnectionWrapper<C, B> {
@@ -274,6 +276,17 @@ mod implementation {
 
         fn is_broken(&mut self) -> bool {
             crate::pooled_connection::PoolableConnection::is_broken(&mut self.inner)
+        }
+    }
+
+    impl<C, B> diesel::migration::MigrationConnection for AsyncConnectionWrapper<C, B>
+    where
+        B: BlockOn,
+        Self: diesel::Connection,
+    {
+        fn setup(&mut self) -> diesel::QueryResult<usize> {
+            self.batch_execute(diesel::migration::CREATE_MIGRATIONS_TABLE)
+                .map(|()| 0)
         }
     }
 
