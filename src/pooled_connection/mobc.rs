@@ -40,6 +40,7 @@
 //! # }
 //! ```
 use super::{AsyncDieselConnectionManager, PoolError, PoolableConnection};
+use diesel::query_builder::QueryFragment;
 use mobc::Manager;
 
 /// Type alias for using [`mobc::Pool`] with [`diesel-async`]
@@ -52,19 +53,24 @@ pub type Builder<C> = mobc::Builder<AsyncDieselConnectionManager<C>>;
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
+    diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        crate::methods::ExecuteDsl<C>,
+    diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {
     type Connection = C;
 
     type Error = PoolError;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        (self.setup)(&self.connection_url)
+        (self.manager_config.custom_setup)(&self.connection_url)
             .await
             .map_err(PoolError::ConnectionError)
     }
 
     async fn check(&self, mut conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
-        conn.ping().await.map_err(PoolError::QueryError)?;
+        conn.ping(&self.manager_config.recycling_method)
+            .await
+            .map_err(PoolError::QueryError)?;
         Ok(conn)
     }
 }

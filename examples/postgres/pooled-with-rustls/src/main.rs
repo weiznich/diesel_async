@@ -1,6 +1,7 @@
 use diesel::{ConnectionError, ConnectionResult};
 use diesel_async::pooled_connection::bb8::Pool;
 use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::ManagerConfig;
 use diesel_async::AsyncPgConnection;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
@@ -10,12 +11,14 @@ use std::time::Duration;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::var("DATABASE_URL").expect("Env var `DATABASE_URL` not set");
 
+    let config = ManagerConfig {
+        custom_setup: Box::new(establish_connection),
+        ..ManagerConfig::default()
+    };
+
     // First we have to construct a connection manager with our custom `establish_connection`
     // function
-    let mgr = AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_setup(
-        db_url,
-        establish_connection,
-    );
+    let mgr = AsyncDieselConnectionManager::<AsyncPgConnection>::new_with_config(db_url, config);
     // From that connection we can then create a pool, here given with some example settings.
     //
     // This creates a TLS configuration that's equivalent to `libpq'` `sslmode=verify-full`, which

@@ -43,6 +43,7 @@
 
 use super::{AsyncDieselConnectionManager, PoolError, PoolableConnection};
 use bb8::ManageConnection;
+use diesel::query_builder::QueryFragment;
 
 /// Type alias for using [`bb8::Pool`] with [`diesel-async`]
 pub type Pool<C> = bb8::Pool<AsyncDieselConnectionManager<C>>;
@@ -55,19 +56,24 @@ pub type RunError = bb8::RunError<super::PoolError>;
 impl<C> ManageConnection for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
+    diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        crate::methods::ExecuteDsl<C>,
+    diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {
     type Connection = C;
 
     type Error = PoolError;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        (self.setup)(&self.connection_url)
+        (self.manager_config.custom_setup)(&self.connection_url)
             .await
             .map_err(PoolError::ConnectionError)
     }
 
     async fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
-        conn.ping().await.map_err(PoolError::QueryError)
+        conn.ping(&self.manager_config.recycling_method)
+            .await
+            .map_err(PoolError::QueryError)
     }
 
     fn has_broken(&self, conn: &mut Self::Connection) -> bool {

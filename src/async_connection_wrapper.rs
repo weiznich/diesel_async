@@ -258,16 +258,22 @@ mod implementation {
         B: BlockOn,
         Self: diesel::Connection,
         C: crate::AsyncConnection<Backend = <Self as diesel::Connection>::Backend>
-            + crate::pooled_connection::PoolableConnection,
+            + crate::pooled_connection::PoolableConnection
+            + 'static,
+        diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+            crate::methods::ExecuteDsl<C>,
+        diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<C>,
     {
         fn ping(&mut self) -> diesel::QueryResult<()> {
-            diesel::Connection::execute_returning_count(self, &C::make_ping_query()).map(|_| ())
+            let fut = crate::pooled_connection::PoolableConnection::ping(
+                &mut self.inner,
+                &crate::pooled_connection::RecyclingMethod::Verified,
+            );
+            self.runtime.block_on(fut)
         }
 
         fn is_broken(&mut self) -> bool {
-            <C::TransactionManager as crate::TransactionManager<_>>::is_broken_transaction_manager(
-                &mut self.inner,
-            )
+            crate::pooled_connection::PoolableConnection::is_broken(&mut self.inner)
         }
     }
 
