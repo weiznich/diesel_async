@@ -13,7 +13,9 @@ mod pooling;
 mod sync_wrapper;
 mod type_check;
 
-async fn transaction_test(conn: &mut TestConnection) -> QueryResult<()> {
+async fn transaction_test<C: AsyncConnection<Backend = TestBackend>>(
+    conn: &mut C,
+) -> QueryResult<()> {
     let res = conn
         .transaction::<i32, diesel::result::Error, _>(|conn| {
             Box::pin(async move {
