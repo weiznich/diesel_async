@@ -181,14 +181,10 @@ where
     C::Target: AsyncConnection,
 {
     type ExecuteFuture<'conn, 'query> =
-        <C::Target as AsyncConnection>::ExecuteFuture<'conn, 'query>
-        where C::Target: 'conn, C: 'conn;
-    type LoadFuture<'conn, 'query> = <C::Target as AsyncConnection>::LoadFuture<'conn, 'query>
-                where C::Target: 'conn, C: 'conn;
-    type Stream<'conn, 'query> = <C::Target as AsyncConnection>::Stream<'conn, 'query>
-                where C::Target: 'conn, C: 'conn;
-    type Row<'conn, 'query> = <C::Target as AsyncConnection>::Row<'conn, 'query>
-                where C::Target: 'conn, C: 'conn;
+        <C::Target as AsyncConnection>::ExecuteFuture<'conn, 'query>;
+    type LoadFuture<'conn, 'query> = <C::Target as AsyncConnection>::LoadFuture<'conn, 'query>;
+    type Stream<'conn, 'query> = <C::Target as AsyncConnection>::Stream<'conn, 'query>;
+    type Row<'conn, 'query> = <C::Target as AsyncConnection>::Row<'conn, 'query>;
 
     type Backend = <C::Target as AsyncConnection>::Backend;
 
