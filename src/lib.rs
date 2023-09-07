@@ -337,6 +337,8 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     // These functions allow the associated types (`ExecuteFuture`, `LoadFuture`, etc.) to
     // compile without a `where Self: '_` clause. This is needed the because bound causes
     // lifetime issues when using `transaction()` with generic `AsyncConnection`s.
+    //
+    // See: https://github.com/rust-lang/rust/issues/87479
     #[doc(hidden)]
     fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
     #[doc(hidden)]
