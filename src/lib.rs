@@ -334,9 +334,11 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
         &mut self,
     ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData;
 
+    // These functions allow the associated types (`ExecuteFuture`, `LoadFuture`, etc.) to
+    // compile without a `where Self: '_` clause. This is needed the because bound causes
+    // lifetime issues when using `transaction()` with generic `AsyncConnection`s.
     #[doc(hidden)]
     fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
-
     #[doc(hidden)]
     fn _silence_lint_on_load_future(_: Self::LoadFuture<'_, '_>) {}
 }
