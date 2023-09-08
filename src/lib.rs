@@ -127,21 +127,13 @@ pub trait SimpleAsyncConnection {
 #[async_trait::async_trait]
 pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// The future returned by `AsyncConnection::execute`
-    type ExecuteFuture<'conn, 'query>: Future<Output = QueryResult<usize>> + Send
-    where
-        Self: 'conn;
+    type ExecuteFuture<'conn, 'query>: Future<Output = QueryResult<usize>> + Send;
     /// The future returned by `AsyncConnection::load`
-    type LoadFuture<'conn, 'query>: Future<Output = QueryResult<Self::Stream<'conn, 'query>>> + Send
-    where
-        Self: 'conn;
+    type LoadFuture<'conn, 'query>: Future<Output = QueryResult<Self::Stream<'conn, 'query>>> + Send;
     /// The inner stream returned by `AsyncConnection::load`
-    type Stream<'conn, 'query>: Stream<Item = QueryResult<Self::Row<'conn, 'query>>> + Send
-    where
-        Self: 'conn;
+    type Stream<'conn, 'query>: Stream<Item = QueryResult<Self::Row<'conn, 'query>>> + Send;
     /// The row type used by the stream returned by `AsyncConnection::load`
-    type Row<'conn, 'query>: Row<'conn, Self::Backend>
-    where
-        Self: 'conn;
+    type Row<'conn, 'query>: Row<'conn, Self::Backend>;
 
     /// The backend this type connects to
     type Backend: Backend;
@@ -341,4 +333,14 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     fn transaction_state(
         &mut self,
     ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData;
+
+    // These functions allow the associated types (`ExecuteFuture`, `LoadFuture`, etc.) to
+    // compile without a `where Self: '_` clause. This is needed the because bound causes
+    // lifetime issues when using `transaction()` with generic `AsyncConnection`s.
+    //
+    // See: https://github.com/rust-lang/rust/issues/87479
+    #[doc(hidden)]
+    fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
+    #[doc(hidden)]
+    fn _silence_lint_on_load_future(_: Self::LoadFuture<'_, '_>) {}
 }
