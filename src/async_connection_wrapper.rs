@@ -109,6 +109,19 @@ mod implementation {
         runtime: B,
     }
 
+    impl<C, B> From<C> for AsyncConnectionWrapper<C, B>
+    where
+        C: crate::AsyncConnection,
+        B: BlockOn + Send,
+    {
+        fn from(inner: C) -> Self {
+            Self {
+                inner,
+                runtime: B::get_runtime(),
+            }
+        }
+    }
+
     impl<C, B> diesel::connection::SimpleConnection for AsyncConnectionWrapper<C, B>
     where
         C: crate::SimpleAsyncConnection,

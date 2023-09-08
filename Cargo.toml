@@ -55,6 +55,7 @@ rustdoc-args = ["--cfg", "doc_cfg"]
 [workspace]
 members = [
         ".",
-        "examples/postgres/pooled-with-rustls"
+        "examples/postgres/pooled-with-rustls",
+        "examples/postgres/run-pending-migrations-with-rustls",
 ]
 
