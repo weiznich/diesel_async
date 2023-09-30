@@ -380,6 +380,7 @@ impl QueryFragment<Pg> for Deferrable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pg::BuildTransaction;
 
     #[tokio::test]
     async fn test_transaction_builder_generates_correct_sql() {

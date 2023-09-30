@@ -200,6 +200,17 @@ mod implementation {
         }
     }
 
+    #[cfg(feature = "postgres")]
+    impl<C, B> crate::pg::BuildTransaction<C> for AsyncConnectionWrapper<C, B>
+    where
+        C: crate::AsyncConnection + crate::pg::BuildTransaction<C>,
+        B: BlockOn + Send,
+    {
+        fn build_transaction(&mut self) -> crate::pg::TransactionBuilder<C> {
+            self.inner.build_transaction()
+        }
+    }
+
     pub struct AsyncCursorWrapper<'a, S, B> {
         stream: Pin<Box<S>>,
         runtime: &'a B,

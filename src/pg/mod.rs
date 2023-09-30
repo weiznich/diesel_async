@@ -238,36 +238,6 @@ fn type_from_oid(t: &PgTypeMetadata) -> QueryResult<Type> {
 }
 
 impl AsyncPgConnection {
-    /// Build a transaction, specifying additional details such as isolation level
-    ///
-    /// See [`TransactionBuilder`] for more examples.
-    ///
-    /// [`TransactionBuilder`]: crate::pg::TransactionBuilder
-    ///
-    /// ```rust
-    /// # include!("../doctest_setup.rs");
-    /// # use scoped_futures::ScopedFutureExt;
-    /// #
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() {
-    /// #     run_test().await.unwrap();
-    /// # }
-    /// #
-    /// # async fn run_test() -> QueryResult<()> {
-    /// #     use schema::users::dsl::*;
-    /// #     let conn = &mut connection_no_transaction().await;
-    /// conn.build_transaction()
-    ///     .read_only()
-    ///     .serializable()
-    ///     .deferrable()
-    ///     .run(|conn| async move { Ok(()) }.scope_boxed())
-    ///     .await
-    /// # }
-    /// ```
-    pub fn build_transaction(&mut self) -> TransactionBuilder<Self> {
-        TransactionBuilder::new(self)
-    }
-
     /// Construct a new `AsyncPgConnection` instance from an existing [`tokio_postgres::Client`]
     pub async fn try_from(conn: tokio_postgres::Client) -> ConnectionResult<Self> {
         let mut conn = Self {
@@ -413,6 +383,47 @@ impl AsyncPgConnection {
             update_transaction_manager_status(res, &mut tm)
         }
         .boxed()
+    }
+}
+
+/// If a type implements this trait it supports building transactions with a
+/// TransactionBuilder.
+pub trait BuildTransaction<C> {
+    /// Build a transaction
+    fn build_transaction(&mut self) -> TransactionBuilder<C>
+    where
+        C: Sized;
+}
+
+impl BuildTransaction<AsyncPgConnection> for AsyncPgConnection {
+    /// Build a transaction, specifying additional details such as isolation level
+    ///
+    /// See [`TransactionBuilder`] for more examples.
+    ///
+    /// [`TransactionBuilder`]: crate::pg::TransactionBuilder
+    ///
+    /// ```rust
+    /// # include!("../doctest_setup.rs");
+    /// # use scoped_futures::ScopedFutureExt;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     use schema::users::dsl::*;
+    /// #     let conn = &mut connection_no_transaction().await;
+    /// conn.build_transaction()
+    ///     .read_only()
+    ///     .serializable()
+    ///     .deferrable()
+    ///     .run(|conn| async move { Ok(()) }.scope_boxed())
+    ///     .await
+    /// # }
+    /// ```
+    fn build_transaction(&mut self) -> TransactionBuilder<Self> {
+        TransactionBuilder::new(self)
     }
 }
 
