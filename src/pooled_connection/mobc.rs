@@ -46,6 +46,9 @@ use mobc::Manager;
 /// Type alias for using [`mobc::Pool`] with [`diesel-async`]
 pub type Pool<C> = mobc::Pool<AsyncDieselConnectionManager<C>>;
 
+/// Type alias for using [`mobc::Connection`] with [`diesel-async`]
+pub type PooledConnection<C> = mobc::Connection<AsyncDieselConnectionManager<C>>;
+
 /// Type alias for using [`mobc::Builder`] with [`diesel-async`]
 pub type Builder<C> = mobc::Builder<AsyncDieselConnectionManager<C>>;
 
