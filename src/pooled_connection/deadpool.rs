@@ -48,7 +48,7 @@ pub type Pool<C> = deadpool::managed::Pool<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::PoolBuilder`] with [`diesel-async`]
 pub type PoolBuilder<C> = deadpool::managed::PoolBuilder<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::BuildError`] with [`diesel-async`]
-pub type BuildError = deadpool::managed::BuildError<super::PoolError>;
+pub type BuildError = deadpool::managed::BuildError;
 /// Type alias for using [`deadpool::managed::PoolError`] with [`diesel-async`]
 pub type PoolError = deadpool::managed::PoolError<super::PoolError>;
 /// Type alias for using [`deadpool::managed::Object`] with [`diesel-async`]
@@ -57,8 +57,6 @@ pub type Object<C> = deadpool::managed::Object<AsyncDieselConnectionManager<C>>;
 pub type Hook<C> = deadpool::managed::Hook<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::HookError`] with [`diesel-async`]
 pub type HookError = deadpool::managed::HookError<super::PoolError>;
-/// Type alias for using [`deadpool::managed::HookErrorCause`] with [`diesel-async`]
-pub type HookErrorCause = deadpool::managed::HookErrorCause<super::PoolError>;
 
 #[async_trait::async_trait]
 impl<C> Manager for AsyncDieselConnectionManager<C>
@@ -78,7 +76,11 @@ where
             .map_err(super::PoolError::ConnectionError)
     }
 
-    async fn recycle(&self, obj: &mut Self::Type) -> deadpool::managed::RecycleResult<Self::Error> {
+    async fn recycle(
+        &self,
+        obj: &mut Self::Type,
+        _: &deadpool::managed::Metrics,
+    ) -> deadpool::managed::RecycleResult<Self::Error> {
         if std::thread::panicking() || obj.is_broken() {
             return Err(deadpool::managed::RecycleError::StaticMessage(
                 "Broken connection",
