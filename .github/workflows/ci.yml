@@ -49,9 +49,10 @@ jobs:
 
       - name: Set environment variables
         shell: bash
-        if: matrix.rust == 'nightly'
+        if: matrix.rust != 'nightly'
         run: |
-          echo "RUSTFLAGS=--cap-lints=warn" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-D warnings" >> $GITHUB_ENV
+          echo "RUSTDOCFLAGS=-D warnings" >> $GITHUB_ENV
 
       - uses: ilammy/setup-nasm@v1
         if: matrix.backend == 'postgres' && matrix.os == 'windows-2019'
@@ -234,7 +235,7 @@ jobs:
           find ~/.cargo/registry -iname "*clippy.toml" -delete
 
       - name: Run clippy
-        run: cargo +stable clippy --all
+        run: cargo +stable clippy --all --all-features
 
       - name: Check formating
         run: cargo +stable fmt --all -- --check

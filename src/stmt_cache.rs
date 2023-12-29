@@ -3,6 +3,8 @@ use std::hash::Hash;
 
 use diesel::backend::Backend;
 use diesel::connection::statement_cache::{MaybeCached, PrepareForCache, StatementCacheKey};
+use diesel::connection::Instrumentation;
+use diesel::connection::InstrumentationEvent;
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 
@@ -40,6 +42,7 @@ impl<S, DB: Backend> StmtCache<DB, S> {
         is_query_safe_to_cache: bool,
         metadata: &[DB::TypeMetadata],
         prepare_fn: F,
+        instrumentation: &std::sync::Mutex<Option<Box<dyn Instrumentation>>>,
     ) -> PrepareFuture<'a, F, S>
     where
         S: Send,
@@ -69,6 +72,10 @@ impl<S, DB: Backend> StmtCache<DB, S> {
             )))),
             Vacant(entry) => {
                 let metadata = metadata.to_vec();
+                instrumentation
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .on_connection_event(InstrumentationEvent::cache_query(&sql));
                 let f = async move {
                     let statement = prepare_fn
                         .prepare(&sql, &metadata, PrepareForCache::Yes)

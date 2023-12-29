@@ -49,6 +49,7 @@ cfg-if = "1"
 chrono = "0.4"
 diesel = { version = "2.2.0", default-features = false, features = ["chrono"] }
 diesel_migrations = "2.2.0"
+assert_matches = "1.0.1"
 
 [features]
 default = []

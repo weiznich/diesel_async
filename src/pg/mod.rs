@@ -10,6 +10,9 @@ use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
+use diesel::connection::Instrumentation;
+use diesel::connection::InstrumentationEvent;
+use diesel::connection::StrQueryHelper;
 use diesel::pg::{
     FailedToLookupTypeError, Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup,
     PgQueryBuilder, PgTypeMetadata,
@@ -109,18 +112,28 @@ pub struct AsyncPgConnection {
     metadata_cache: Arc<Mutex<PgMetadataCache>>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
+    // a sync mutex is fine here as we only hold it for a really short time
+    instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
 }
 
 #[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
+        self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
+            query,
+        )));
         let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
         let batch_execute = self
             .conn
             .batch_execute(query)
             .map_err(ErrorHelper)
             .map_err(Into::into);
-        drive_future(connection_future, batch_execute).await
+        let r = drive_future(connection_future, batch_execute).await;
+        self.record_instrumentation(InstrumentationEvent::finish_query(
+            &StrQueryHelper::new(query),
+            r.as_ref().err(),
+        ));
+        r
     }
 }
 
@@ -182,6 +195,21 @@ impl AsyncConnection for AsyncPgConnection {
         } else {
             panic!("Cannot access shared transaction state")
         }
+    }
+
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(instrumentation) = Arc::get_mut(&mut self.instrumentation) {
+            instrumentation.get_mut().unwrap_or_else(|p| p.into_inner())
+        } else {
+            panic!("Cannot access shared instrumentation")
+        }
+    }
+
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+        self.instrumentation = Arc::new(std::sync::Mutex::new(Some(Box::new(instrumentation))));
     }
 }
 
@@ -323,6 +351,7 @@ impl AsyncPgConnection {
             metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
             connection_future,
             shutdown_channel,
+            instrumentation: Arc::new(std::sync::Mutex::new(None)),
         };
         conn.set_config_options()
             .await
@@ -363,6 +392,9 @@ impl AsyncPgConnection {
         F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
+        self.record_instrumentation(InstrumentationEvent::start_query(&diesel::debug_query(
+            &query,
+        )));
         // we explicilty descruct the query here before going into the async block
         //
         // That's required to remove the send bound from `T` as we have translated
@@ -395,6 +427,7 @@ impl AsyncPgConnection {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn with_prepared_statement_after_sql_built<'a, F, R>(
         &mut self,
         callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
@@ -414,80 +447,102 @@ impl AsyncPgConnection {
         let stmt_cache = self.stmt_cache.clone();
         let metadata_cache = self.metadata_cache.clone();
         let tm = self.transaction_state.clone();
+        let instrumentation = self.instrumentation.clone();
 
         async move {
             let sql = to_sql_result.map(|_| query_builder.finish())?;
-            let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
-            collect_bind_result?;
-            // Check whether we need to resolve some types at all
-            //
-            // If the user doesn't use custom types there is no need
-            // to borther with that at all
-            if !metadata_lookup.unresolved_types.is_empty() {
-                let metadata_cache = &mut *metadata_cache.lock().await;
-                let mut next_unresolved = metadata_lookup.unresolved_types.into_iter();
-                for m in &mut bind_collector.metadata {
-                    // for each unresolved item
-                    // we check whether it's arleady in the cache
-                    // or perform a lookup and insert it into the cache
-                    if m.oid().is_err() {
-                        if let Some((ref schema, ref lookup_type_name)) = next_unresolved.next() {
-                            let cache_key = PgMetadataCacheKey::new(
-                                schema.as_ref().map(Into::into),
-                                lookup_type_name.into(),
-                            );
-                            if let Some(entry) = metadata_cache.lookup_type(&cache_key) {
-                                *m = entry;
-                            } else {
-                                let type_metadata = lookup_type(
-                                    schema.clone(),
-                                    lookup_type_name.clone(),
-                                    &raw_connection,
-                                )
-                                .await?;
-                                *m = PgTypeMetadata::from_result(Ok(type_metadata));
+            let res = async {
+                let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
+                collect_bind_result?;
+                // Check whether we need to resolve some types at all
+                //
+                // If the user doesn't use custom types there is no need
+                // to borther with that at all
+                if !metadata_lookup.unresolved_types.is_empty() {
+                    let metadata_cache = &mut *metadata_cache.lock().await;
+                    let mut next_unresolved = metadata_lookup.unresolved_types.into_iter();
+                    for m in &mut bind_collector.metadata {
+                        // for each unresolved item
+                        // we check whether it's arleady in the cache
+                        // or perform a lookup and insert it into the cache
+                        if m.oid().is_err() {
+                            if let Some((ref schema, ref lookup_type_name)) = next_unresolved.next()
+                            {
+                                let cache_key = PgMetadataCacheKey::new(
+                                    schema.as_ref().map(Into::into),
+                                    lookup_type_name.into(),
+                                );
+                                if let Some(entry) = metadata_cache.lookup_type(&cache_key) {
+                                    *m = entry;
+                                } else {
+                                    let type_metadata = lookup_type(
+                                        schema.clone(),
+                                        lookup_type_name.clone(),
+                                        &raw_connection,
+                                    )
+                                    .await?;
+                                    *m = PgTypeMetadata::from_result(Ok(type_metadata));
 
-                                metadata_cache.store_type(cache_key, type_metadata);
+                                    metadata_cache.store_type(cache_key, type_metadata);
+                                }
+                            } else {
+                                break;
                             }
-                        } else {
-                            break;
                         }
                     }
                 }
-            }
-            let key = match query_id {
-                Some(id) => StatementCacheKey::Type(id),
-                None => StatementCacheKey::Sql {
-                    sql: sql.clone(),
-                    bind_types: bind_collector.metadata.clone(),
-                },
-            };
-            let stmt = {
-                let mut stmt_cache = stmt_cache.lock().await;
-                stmt_cache
-                    .cached_prepared_statement(
-                        key,
-                        sql,
-                        is_safe_to_cache_prepared,
-                        &bind_collector.metadata,
-                        raw_connection.clone(),
-                    )
-                    .await?
-                    .0
-                    .clone()
-            };
+                let key = match query_id {
+                    Some(id) => StatementCacheKey::Type(id),
+                    None => StatementCacheKey::Sql {
+                        sql: sql.clone(),
+                        bind_types: bind_collector.metadata.clone(),
+                    },
+                };
+                let stmt = {
+                    let mut stmt_cache = stmt_cache.lock().await;
+                    stmt_cache
+                        .cached_prepared_statement(
+                            key,
+                            sql.clone(),
+                            is_safe_to_cache_prepared,
+                            &bind_collector.metadata,
+                            raw_connection.clone(),
+                            &instrumentation,
+                        )
+                        .await?
+                        .0
+                        .clone()
+                };
 
-            let binds = bind_collector
-                .metadata
-                .into_iter()
-                .zip(bind_collector.binds)
-                .map(|(meta, bind)| ToSqlHelper(meta, bind))
-                .collect::<Vec<_>>();
-            let res = callback(raw_connection, stmt.clone(), binds).await;
+                let binds = bind_collector
+                    .metadata
+                    .into_iter()
+                    .zip(bind_collector.binds)
+                    .map(|(meta, bind)| ToSqlHelper(meta, bind))
+                    .collect::<Vec<_>>();
+                callback(raw_connection, stmt.clone(), binds).await
+            };
+            let res = res.await;
             let mut tm = tm.lock().await;
-            update_transaction_manager_status(res, &mut tm)
+            let r = update_transaction_manager_status(res, &mut tm);
+            instrumentation
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .on_connection_event(InstrumentationEvent::finish_query(
+                    &StrQueryHelper::new(&sql),
+                    r.as_ref().err(),
+                ));
+
+            r
         }
         .boxed()
+    }
+
+    fn record_instrumentation(&self, event: InstrumentationEvent<'_>) {
+        self.instrumentation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .on_connection_event(event);
     }
 }
 
