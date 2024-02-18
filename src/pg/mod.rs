@@ -328,12 +328,10 @@ impl AsyncPgConnection {
     async fn set_config_options(&mut self) -> QueryResult<()> {
         use crate::run_query_dsl::RunQueryDsl;
 
-        diesel::sql_query("SET TIME ZONE 'UTC'")
-            .execute(self)
-            .await?;
-        diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'")
-            .execute(self)
-            .await?;
+        futures_util::try_join!(
+            diesel::sql_query("SET TIME ZONE 'UTC'").execute(self),
+            diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'").execute(self),
+        )?;
         Ok(())
     }
 
