@@ -57,7 +57,8 @@ impl AsyncConnection for AsyncMysqlConnection {
             .map_err(|e| diesel::result::ConnectionError::InvalidConnectionUrl(e.to_string()))?;
         let builder = OptsBuilder::from_opts(opts)
             .init(CONNECTION_SETUP_QUERIES.to_vec())
-            .stmt_cache_size(0); // We have our own cache
+            .stmt_cache_size(0) // We have our own cache
+            .client_found_rows(true); // This allows a consistent behavior between MariaDB/MySQL and PostgreSQL (and is already set in `diesel`)
 
         let conn = mysql_async::Conn::new(builder).await.map_err(ErrorHelper)?;
 
