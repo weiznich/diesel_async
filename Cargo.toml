@@ -38,7 +38,7 @@ diesel_migrations = "2.1.0"
 default = []
 mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common", "futures-channel", "tokio"]
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
-async-connection-wrapper = []
+async-connection-wrapper = ["tokio/net"]
 r2d2 = ["diesel/r2d2"]
 
 [[test]]
