@@ -49,7 +49,7 @@ path = "tests/lib.rs"
 harness = true
 
 [package.metadata.docs.rs]
-features = ["postgres", "mysql", "deadpool", "bb8", "mobc", "async-connection-wrapper", "r2d2"]
+features = ["postgres", "mysql", "sqlite", "deadpool", "bb8", "mobc", "async-connection-wrapper", "sync-connection-wrapper", "r2d2"]
 no-default-features = true
 rustc-args = ["--cfg", "doc_cfg"]
 rustdoc-args = ["--cfg", "doc_cfg"]

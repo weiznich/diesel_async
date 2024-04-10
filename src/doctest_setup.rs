@@ -162,6 +162,81 @@ cfg_if::cfg_if! {
 
             connection
         }
+    }  else if #[cfg(feature = "sqlite")] {
+        use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
+        use diesel::sqlite::SqliteConnection;
+        #[allow(dead_code)]
+        type DB = diesel::sqlite::Sqlite;
+        #[allow(dead_code)]
+        type DbConnection = SyncConnectionWrapper<SqliteConnection>;
+
+        fn database_url() -> String {
+            database_url_from_env("SQLITE_DATABASE_URL")
+        }
+
+        async fn connection_no_data() -> SyncConnectionWrapper<SqliteConnection> {
+            use diesel_async::AsyncConnection;
+            let connection_url = database_url();
+            SyncConnectionWrapper::<SqliteConnection>::establish(&connection_url).await.unwrap()
+        }
+
+        async fn create_tables(connection: &mut SyncConnectionWrapper<SqliteConnection>) {
+            use diesel_async::RunQueryDsl;
+            use diesel_async::AsyncConnection;
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )").execute(connection).await.unwrap();
+
+
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS animals (
+                id INTEGER PRIMARY KEY,
+                species TEXT NOT NULL,
+                legs INTEGER NOT NULL,
+                name TEXT
+            )").execute(connection).await.unwrap();
+
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS posts (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL
+            )").execute(connection).await.unwrap();
+
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS comments (
+                id INTEGER PRIMARY KEY,
+                post_id INTEGER NOT NULL,
+                body TEXT NOT NULL
+            )").execute(connection).await.unwrap();
+            diesel::sql_query("CREATE TEMPORARY TABLE IF NOT EXISTS brands (
+                id INTEGER PRIMARY KEY,
+                color VARCHAR(255) NOT NULL DEFAULT 'Green',
+                accent VARCHAR(255) DEFAULT 'Blue'
+            )").execute(connection).await.unwrap();
+
+            connection.begin_test_transaction().await.unwrap();
+            diesel::sql_query("INSERT INTO users (name) VALUES ('Sean'), ('Tess')").execute(connection).await.unwrap();
+            diesel::sql_query("INSERT INTO posts (user_id, title) VALUES
+                (1, 'My first post'),
+                (1, 'About Rust'),
+                (2, 'My first post too')").execute(connection).await.unwrap();
+            diesel::sql_query("INSERT INTO comments (post_id, body) VALUES
+                (1, 'Great post'),
+                (2, 'Yay! I am learning Rust'),
+                (3, 'I enjoyed your post')").execute(connection).await.unwrap();
+            diesel::sql_query("INSERT INTO animals (species, legs, name) VALUES
+                               ('dog', 4, 'Jack'),
+                               ('spider', 8, null)").execute(connection).await.unwrap();
+
+        }
+
+        #[allow(dead_code)]
+        async fn establish_connection() -> SyncConnectionWrapper<SqliteConnection> {
+            let mut connection = connection_no_data().await;
+            create_tables(&mut connection).await;
+
+
+            connection
+        }
     } else {
         compile_error!(
             "At least one backend must be used to test this crate.\n \
