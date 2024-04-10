@@ -208,10 +208,12 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?;
     /// assert_eq!(1, inserted_rows);
     ///
+    /// # #[cfg(not(feature = "sqlite"))]
     /// let inserted_rows = insert_into(users)
     ///     .values(&vec![name.eq("Jim"), name.eq("James")])
     ///     .execute(connection)
     ///     .await?;
+    /// # #[cfg(not(feature = "sqlite"))]
     /// assert_eq!(2, inserted_rows);
     /// #     Ok(())
     /// # }
@@ -604,10 +606,12 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use schema::users::dsl::*;
     /// #     let connection = &mut establish_connection().await;
-    /// diesel::insert_into(users)
-    ///     .values(&vec![name.eq("Sean"), name.eq("Pascal")])
-    ///     .execute(connection)
-    ///     .await?;
+    /// for n in &["Sean", "Pascal"] {
+    ///     diesel::insert_into(users)
+    ///         .values(name.eq(n))
+    ///         .execute(connection)
+    ///         .await?;
+    /// }
     ///
     /// let first_name = users.order(id)
     ///     .select(name)
@@ -678,6 +682,7 @@ impl<T, Conn> RunQueryDsl<Conn> for T {}
 /// #     use self::animals::dsl::*;
 /// #     let connection = &mut establish_connection().await;
 /// let form = AnimalForm { id: 2, name: "Super scary" };
+/// # #[cfg(not(feature = "sqlite"))]
 /// let changed_animal = form.save_changes(connection).await?;
 /// let expected_animal = Animal {
 ///     id: 2,
@@ -685,6 +690,7 @@ impl<T, Conn> RunQueryDsl<Conn> for T {}
 ///     legs: 8,
 ///     name: Some(String::from("Super scary")),
 /// };
+/// # #[cfg(not(feature = "sqlite"))]
 /// assert_eq!(expected_animal, changed_animal);
 /// #     Ok(())
 /// # }

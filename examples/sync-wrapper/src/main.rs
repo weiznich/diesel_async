@@ -28,6 +28,7 @@ type InnerConnection = SqliteConnection;
 type InnerDB = Sqlite;
 
 async fn establish(db_url: &str) -> ConnectionResult<SyncConnectionWrapper<InnerConnection>> {
+    // It is necessary to specify the specific inner connection type because of inference issues
     SyncConnectionWrapper::<SqliteConnection>::establish(db_url).await
 }
 
