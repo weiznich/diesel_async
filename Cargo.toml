@@ -38,6 +38,8 @@ diesel_migrations = "2.1.0"
 default = []
 mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common", "futures-channel", "tokio"]
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
+sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
+sync-connection-wrapper = ["tokio/rt"]
 async-connection-wrapper = ["tokio/net"]
 r2d2 = ["diesel/r2d2"]
 
@@ -57,4 +59,5 @@ members = [
         ".",
         "examples/postgres/pooled-with-rustls",
         "examples/postgres/run-pending-migrations-with-rustls",
+        "examples/sync-wrapper",
 ]

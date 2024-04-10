@@ -1,0 +1,17 @@
+[package]
+name = "sync-wrapper"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diesel = { version = "2.1.0", default-features = false }
+diesel-async = { version = "0.4.0", path = "../../", features = ["sync-connection-wrapper", "async-connection-wrapper"] }
+diesel_migrations = "2.1.0"
+futures-util = "0.3.21"
+tokio = { version = "1.2.0", default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = ["sqlite"]
+sqlite = ["diesel-async/sqlite"]
