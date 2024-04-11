@@ -125,8 +125,9 @@ where
     {
         self.execute_with_prepared_query(source.as_query(), |conn, query| {
             use diesel::row::IntoOwnedRow;
+            let mut cache = None;
             conn.load(&query).map(|c| {
-                c.map(|row| row.map(IntoOwnedRow::into_owned))
+                c.map(|row| row.map(|r| IntoOwnedRow::into_owned(r, &mut cache)))
                     .collect::<Vec<QueryResult<O>>>()
             })
         })
