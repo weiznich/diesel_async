@@ -137,7 +137,7 @@ async fn setup(connection: &mut TestConnection) {
 }
 
 #[cfg(feature = "postgres")]
-diesel::sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
+diesel::define_sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
 
 #[cfg(feature = "postgres")]
 #[tokio::test]
