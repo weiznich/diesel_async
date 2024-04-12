@@ -38,7 +38,9 @@ diesel_migrations = "2.1.0"
 default = []
 mysql = ["diesel/mysql_backend", "mysql_async", "mysql_common", "futures-channel", "tokio"]
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
-async-connection-wrapper = []
+sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
+sync-connection-wrapper = ["tokio/rt"]
+async-connection-wrapper = ["tokio/net"]
 r2d2 = ["diesel/r2d2"]
 
 [[test]]
@@ -47,7 +49,7 @@ path = "tests/lib.rs"
 harness = true
 
 [package.metadata.docs.rs]
-features = ["postgres", "mysql", "deadpool", "bb8", "mobc", "async-connection-wrapper", "r2d2"]
+features = ["postgres", "mysql", "sqlite", "deadpool", "bb8", "mobc", "async-connection-wrapper", "sync-connection-wrapper", "r2d2"]
 no-default-features = true
 rustc-args = ["--cfg", "doc_cfg"]
 rustdoc-args = ["--cfg", "doc_cfg"]
@@ -57,4 +59,8 @@ members = [
         ".",
         "examples/postgres/pooled-with-rustls",
         "examples/postgres/run-pending-migrations-with-rustls",
+        "examples/sync-wrapper",
 ]
+
+[patch.crates-io]
+diesel = { git = "http://github.com/diesel-rs/diesel", rev = "793de72" }

@@ -14,11 +14,12 @@
 //!
 //! These traits closely mirror their diesel counter parts while providing async functionality.
 //!
-//! In addition to these core traits 2 fully async connection implementations are provided
+//! In addition to these core traits 3 fully async connection implementations are provided
 //! by diesel-async:
 //!
 //! * [`AsyncMysqlConnection`] (enabled by the `mysql` feature)
 //! * [`AsyncPgConnection`] (enabled by the `postgres` feature)
+//! * [`SyncConnectionWrapper`] (enabled by the `sync-connection-wrapper` feature)
 //!
 //! Ordinary usage of `diesel-async` assumes that you just replace the corresponding sync trait
 //! method calls and connections with their async counterparts.
@@ -92,7 +93,10 @@ pub mod pg;
 ))]
 pub mod pooled_connection;
 mod run_query_dsl;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
 mod stmt_cache;
+#[cfg(feature = "sync-connection-wrapper")]
+pub mod sync_connection_wrapper;
 mod transaction_manager;
 
 #[cfg(feature = "mysql")]

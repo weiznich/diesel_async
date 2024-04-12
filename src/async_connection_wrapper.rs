@@ -100,13 +100,14 @@ pub type AsyncConnectionWrapper<C, B = self::implementation::Tokio> =
 pub use self::implementation::AsyncConnectionWrapper;
 
 mod implementation {
-    use diesel::connection::SimpleConnection;
+    use diesel::connection::{Instrumentation, SimpleConnection};
 
     use super::*;
 
     pub struct AsyncConnectionWrapper<C, B> {
         inner: C,
         runtime: B,
+        instrumentation: Option<Box<dyn Instrumentation>>,
     }
 
     impl<C, B> From<C> for AsyncConnectionWrapper<C, B>
@@ -118,6 +119,7 @@ mod implementation {
             Self {
                 inner,
                 runtime: B::get_runtime(),
+                instrumentation: None,
             }
         }
     }
@@ -148,7 +150,11 @@ mod implementation {
             let runtime = B::get_runtime();
             let f = C::establish(database_url);
             let inner = runtime.block_on(f)?;
-            Ok(Self { inner, runtime })
+            Ok(Self {
+                inner,
+                runtime,
+                instrumentation: None,
+            })
         }
 
         fn execute_returning_count<T>(&mut self, source: &T) -> diesel::QueryResult<usize>
@@ -163,6 +169,14 @@ mod implementation {
         &mut self,
         ) -> &mut <Self::TransactionManager as diesel::connection::TransactionManager<Self>>::TransactionStateData{
             self.inner.transaction_state()
+        }
+
+        fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+            &mut self.instrumentation
+        }
+
+        fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+            self.instrumentation = Some(Box::new(instrumentation));
         }
     }
 

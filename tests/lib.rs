@@ -93,6 +93,9 @@ struct User {
 type TestConnection = AsyncMysqlConnection;
 #[cfg(feature = "postgres")]
 type TestConnection = AsyncPgConnection;
+#[cfg(feature = "sqlite")]
+type TestConnection =
+    sync_connection_wrapper::SyncConnectionWrapper<diesel::sqlite::SqliteConnection>;
 
 #[allow(dead_code)]
 type TestBackend = <TestConnection as AsyncConnection>::Backend;
@@ -100,11 +103,17 @@ type TestBackend = <TestConnection as AsyncConnection>::Backend;
 #[tokio::test]
 async fn test_basic_insert_and_load() -> QueryResult<()> {
     let conn = &mut connection().await;
+    // Insertion split into 2 since Sqlite batch insert isn't supported for diesel_async yet
     let res = diesel::insert_into(users::table)
-        .values([users::name.eq("John Doe"), users::name.eq("Jane Doe")])
+        .values(users::name.eq("John Doe"))
         .execute(conn)
         .await;
-    assert_eq!(res, Ok(2), "User count does not match");
+    assert_eq!(res, Ok(1), "User count does not match");
+    let res = diesel::insert_into(users::table)
+        .values(users::name.eq("Jane Doe"))
+        .execute(conn)
+        .await;
+    assert_eq!(res, Ok(1), "User count does not match");
     let users = users::table.load::<User>(conn).await?;
     assert_eq!(&users[0].name, "John Doe", "User name [0] does not match");
     assert_eq!(&users[1].name, "Jane Doe", "User name [1] does not match");
@@ -128,7 +137,7 @@ async fn setup(connection: &mut TestConnection) {
 }
 
 #[cfg(feature = "postgres")]
-diesel::sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
+diesel::define_sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
 
 #[cfg(feature = "postgres")]
 #[tokio::test]
@@ -179,6 +188,19 @@ async fn setup(connection: &mut TestConnection) {
     .unwrap();
 }
 
+#[cfg(feature = "sqlite")]
+async fn setup(connection: &mut TestConnection) {
+    diesel::sql_query(
+        "CREATE TEMPORARY TABLE users (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )",
+    )
+    .execute(connection)
+    .await
+    .unwrap();
+}
+
 async fn connection() -> TestConnection {
     let db_url = std::env::var("DATABASE_URL").unwrap();
     let mut conn = TestConnection::establish(&db_url).await.unwrap();
@@ -187,7 +209,7 @@ async fn connection() -> TestConnection {
         conn.begin_test_transaction().await.unwrap();
     }
     setup(&mut conn).await;
-    if cfg!(feature = "mysql") {
+    if cfg!(feature = "mysql") || cfg!(feature = "sqlite") {
         // mysql does not allow this and does even automatically close
         // any open transaction. As of this we open a transaction **after**
         // we setup the schema
