@@ -22,7 +22,7 @@ jobs:
       matrix:
         rust: ["stable", "beta", "nightly"]
         backend: ["postgres", "mysql", "sqlite"]
-        os: [ubuntu-latest, macos-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, macos-latest, macos-14, windows-2019]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
@@ -125,23 +125,25 @@ jobs:
       - name: Install mysql (MacOS)
         if: matrix.os == 'macos-latest' && matrix.backend == 'mysql'
         run: |
-          brew install mariadb@10.5
-          /usr/local/opt/mariadb@10.5/bin/mysql_install_db
-          /usr/local/opt/mariadb@10.5/bin/mysql.server start
+          brew install mariadb@11.3
+          /usr/local/opt/mariadb@11.3/bin/mysql_install_db
+          /usr/local/opt/mariadb@11.3/bin/mysql.server start
           sleep 3
-          /usr/local/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
-          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
+          /usr/local/opt/mariadb@11.3/bin/mysqladmin -u runner password diesel
+          /usr/local/opt/mariadb@11.3/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS M1)
         if: matrix.os == 'macos-14' && matrix.backend == 'mysql'
         run: |
-          brew install mariadb@10.5
-          ls /opt/homebrew/opt/mariadb@10.5
-          /opt/homebrew/opt/mariadb@10.5/bin/mysql_install_db
-          /opt/homebrew/opt/mariadb@10.5/bin/mysql.server start
+          brew install mariadb@11.3
+          ls /opt/homebrew/opt/mariadb@11.3
+          /opt/homebrew/opt/mariadb@11.3/bin/mysql_install_db
+          /opt/homebrew/opt/mariadb@11.3/bin/mysql.server start
           sleep 3
-          /opt/homebrew/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
-          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
+          /opt/homebrew/opt/mariadb@11.3/bin/mysqladmin -u runner password diesel
+          /opt/homebrew/opt/mariadb@11.3/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install postgres (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'postgres'
@@ -236,4 +238,6 @@ jobs:
       - name: Check diesel-async
         # cannot test mysql yet as that crate
         # has broken min-version dependencies
-        run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc sqlite"
+        # cannot test sqlite yet as that crate
+        # as broken min-version dependencies as well
+        run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
