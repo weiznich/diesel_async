@@ -21,19 +21,16 @@ jobs:
       fail-fast: false
       matrix:
         rust: ["stable", "beta", "nightly"]
-        backend: ["postgres", "mysql"]
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        backend: ["postgres", "mysql", "sqlite"]
+        os: [ubuntu-latest, macos-latest, macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
           key: ${{ runner.os }}-${{ matrix.backend }}-cargo-${{ hashFiles('**/Cargo.toml') }}
 
       - name: Set environment variables
@@ -66,8 +63,44 @@ jobs:
           mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'root'@'localhost';" -uroot -proot
           echo "DATABASE_URL=mysql://root:root@localhost/diesel_test" >> $GITHUB_ENV
 
+      - name: Install sqlite (Linux)
+        if: runner.os == 'Linux' && matrix.backend == 'sqlite'
+        run: |
+          curl -fsS --retry 3 -o sqlite-autoconf-3400100.tar.gz https://www.sqlite.org/2022/sqlite-autoconf-3400100.tar.gz
+          tar zxf sqlite-autoconf-3400100.tar.gz
+          cd sqlite-autoconf-3400100
+          CFLAGS="$CFLAGS -O2 -fno-strict-aliasing \
+              -DSQLITE_DEFAULT_FOREIGN_KEYS=1 \
+              -DSQLITE_SECURE_DELETE \
+              -DSQLITE_ENABLE_COLUMN_METADATA \
+              -DSQLITE_ENABLE_FTS3_PARENTHESIS \
+              -DSQLITE_ENABLE_RTREE=1 \
+              -DSQLITE_SOUNDEX=1 \
+              -DSQLITE_ENABLE_UNLOCK_NOTIFY \
+              -DSQLITE_OMIT_LOOKASIDE=1 \
+              -DSQLITE_ENABLE_DBSTAT_VTAB \
+              -DSQLITE_ENABLE_UPDATE_DELETE_LIMIT=1 \
+              -DSQLITE_ENABLE_LOAD_EXTENSION \
+              -DSQLITE_ENABLE_JSON1 \
+              -DSQLITE_LIKE_DOESNT_MATCH_BLOBS \
+              -DSQLITE_THREADSAFE=1 \
+              -DSQLITE_ENABLE_FTS3_TOKENIZER=1 \
+              -DSQLITE_MAX_SCHEMA_RETRY=25 \
+              -DSQLITE_ENABLE_PREUPDATE_HOOK \
+              -DSQLITE_ENABLE_SESSION \
+              -DSQLITE_ENABLE_STMTVTAB \
+              -DSQLITE_MAX_VARIABLE_NUMBER=250000" \
+          ./configure --prefix=/usr \
+              --enable-threadsafe \
+              --enable-dynamic-extensions \
+              --libdir=/usr/lib/x86_64-linux-gnu \
+              --libexecdir=/usr/lib/x86_64-linux-gnu/sqlite3
+          sudo make
+          sudo make install
+          echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
+
       - name: Install postgres (MacOS)
-        if: runner.os == 'macOS' && matrix.backend == 'postgres'
+        if: matrix.os == 'macos-latest' && matrix.backend == 'postgres'
         run: |
           initdb -D /usr/local/var/postgres
           pg_ctl -D /usr/local/var/postgres start
@@ -75,16 +108,40 @@ jobs:
           createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
 
-      - name: Install mysql (MacOS)
-        if: runner.os == 'macOS' && matrix.backend == 'mysql'
+      - name: Install postgres (MacOS M1)
+        if: matrix.os == 'macos-14' && matrix.backend == 'postgres'
         run: |
-          brew install --overwrite mariadb@10.8
-          /usr/local/opt/mariadb@10.8/bin/mysql_install_db
-          /usr/local/opt/mariadb@10.8/bin/mysql.server start
+          brew install postgresql
+          brew services start postgresql@14
           sleep 3
-          /usr/local/opt/mariadb@10.8/bin/mysql -e "ALTER USER 'runner'@'localhost' IDENTIFIED BY 'diesel';" -urunner
-          /usr/local/opt/mariadb@10.8/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner -pdiesel
-          echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
+          createuser -s postgres
+          echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
+      - name: Install sqlite (MacOS)
+        if: runner.os == 'macOS' && matrix.backend == 'sqlite'
+        run: |
+          brew install sqlite
+          echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
+
+      - name: Install mysql (MacOS)
+        if: matrix.os == 'macos-latest' && matrix.backend == 'mysql'
+        run: |
+          brew install mariadb@10.5
+          /usr/local/opt/mariadb@10.5/bin/mysql_install_db
+          /usr/local/opt/mariadb@10.5/bin/mysql.server start
+          sleep 3
+          /usr/local/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
+
+      - name: Install mysql (MacOS M1)
+        if: matrix.os == 'macos-14' && matrix.backend == 'mysql'
+        run: |
+          brew install mariadb@10.5
+          ls /opt/homebrew/opt/mariadb@10.5
+          /opt/homebrew/opt/mariadb@10.5/bin/mysql_install_db
+          /opt/homebrew/opt/mariadb@10.5/bin/mysql.server start
+          sleep 3
+          /opt/homebrew/opt/mariadb@10.5/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          echo "DATABASE_URL=mysql://runner@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install postgres (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'postgres'
@@ -106,6 +163,22 @@ jobs:
         run: |
           echo "DATABASE_URL=mysql://root@localhost/diesel_test" >> $GITHUB_ENV
 
+      - name: Install sqlite (Windows)
+        if: runner.os == 'Windows' && matrix.backend == 'sqlite'
+        shell: cmd
+        run: |
+          choco install sqlite
+          cd /D C:\ProgramData\chocolatey\lib\SQLite\tools
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          lib /machine:x64 /def:sqlite3.def /out:sqlite3.lib
+      - name: Set variables for sqlite (Windows)
+        if: runner.os == 'Windows' && matrix.backend == 'sqlite'
+        shell: bash
+        run: |
+          echo "C:\ProgramData\chocolatey\lib\SQLite\tools" >> $GITHUB_PATH
+          echo "SQLITE3_LIB_DIR=C:\ProgramData\chocolatey\lib\SQLite\tools" >> $GITHUB_ENV
+          echo "DATABASE_URL=C:\test.db" >> $GITHUB_ENV
+
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -115,26 +188,29 @@ jobs:
 
       - name: Test diesel_async
         run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc"
-      - name: Run examples
+
+      - name: Run examples (Postgres)
         if: matrix.backend == 'postgres'
         run: |
           cargo +${{ matrix.rust }} check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
           cargo +${{ matrix.rust }} check --manifest-path examples/postgres/run-pending-migrations-with-rustls/Cargo.toml
 
+      - name: Run examples (Sqlite)
+        if: matrix.backend == 'sqlite'
+        run: |
+          cargo +${{ matrix.rust }} check --manifest-path examples/sync-wrapper/Cargo.toml
+
   rustfmt_and_clippy:
     name: Check rustfmt style && run clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
           key: clippy-cargo-${{ hashFiles('**/Cargo.toml') }}
 
       - name: Remove potential newer clippy.toml from dependencies
@@ -152,7 +228,7 @@ jobs:
     name: Check Minimal supported rust version (1.65.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.65.0
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-hack
@@ -160,4 +236,4 @@ jobs:
       - name: Check diesel-async
         # cannot test mysql yet as that crate
         # has broken min-version dependencies
-        run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
+        run: cargo +stable minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc sqlite"
