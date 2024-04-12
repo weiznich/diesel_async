@@ -61,3 +61,6 @@ members = [
         "examples/postgres/run-pending-migrations-with-rustls",
         "examples/sync-wrapper",
 ]
+
+[patch.crates-io]
+diesel = { git = "http://github.com/diesel-rs/diesel", rev = "793de72" }
