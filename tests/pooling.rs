@@ -1,6 +1,8 @@
 use super::{users, User};
 use diesel::prelude::*;
-use diesel_async::{RunQueryDsl, SaveChangesDsl};
+use diesel_async::RunQueryDsl;
+#[cfg(not(feature = "sqlite"))]
+use diesel_async::SaveChangesDsl;
 
 #[tokio::test]
 #[cfg(feature = "bb8")]
@@ -23,13 +25,17 @@ async fn save_changes_bb8() {
         .await
         .unwrap();
 
-    let mut u = users::table.first::<User>(&mut conn).await.unwrap();
+    let u = users::table.first::<User>(&mut conn).await.unwrap();
     assert_eq!(u.name, "John");
 
-    u.name = "Jane".into();
-    let u2: User = u.save_changes(&mut conn).await.unwrap();
+    #[cfg(not(feature = "sqlite"))]
+    {
+        let mut u = u;
+        u.name = "Jane".into();
+        let u2: User = u.save_changes(&mut conn).await.unwrap();
 
-    assert_eq!(u2.name, "Jane");
+        assert_eq!(u2.name, "Jane");
+    }
 }
 
 #[tokio::test]
@@ -53,13 +59,17 @@ async fn save_changes_deadpool() {
         .await
         .unwrap();
 
-    let mut u = users::table.first::<User>(&mut conn).await.unwrap();
+    let u = users::table.first::<User>(&mut conn).await.unwrap();
     assert_eq!(u.name, "John");
 
-    u.name = "Jane".into();
-    let u2: User = u.save_changes(&mut conn).await.unwrap();
+    #[cfg(not(feature = "sqlite"))]
+    {
+        let mut u = u;
+        u.name = "Jane".into();
+        let u2: User = u.save_changes(&mut conn).await.unwrap();
 
-    assert_eq!(u2.name, "Jane");
+        assert_eq!(u2.name, "Jane");
+    }
 }
 
 #[tokio::test]
@@ -83,11 +93,15 @@ async fn save_changes_mobc() {
         .await
         .unwrap();
 
-    let mut u = users::table.first::<User>(&mut conn).await.unwrap();
+    let u = users::table.first::<User>(&mut conn).await.unwrap();
     assert_eq!(u.name, "John");
 
-    u.name = "Jane".into();
-    let u2: User = u.save_changes(&mut conn).await.unwrap();
+    #[cfg(not(feature = "sqlite"))]
+    {
+        let mut u = u;
+        u.name = "Jane".into();
+        let u2: User = u.save_changes(&mut conn).await.unwrap();
 
-    assert_eq!(u2.name, "Jane");
+        assert_eq!(u2.name, "Jane");
+    }
 }

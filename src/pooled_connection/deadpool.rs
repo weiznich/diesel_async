@@ -27,6 +27,13 @@
 //! #     config
 //! #  }
 //! #
+//! # #[cfg(feature = "sqlite")]
+//! # fn get_config() -> AsyncDieselConnectionManager<diesel_async::sync_connection_wrapper::SyncConnectionWrapper<diesel::SqliteConnection>> {
+//! #     let db_url = database_url_from_env("SQLITE_DATABASE_URL");
+//! #     let config = AsyncDieselConnectionManager::<diesel_async::sync_connection_wrapper::SyncConnectionWrapper<diesel::SqliteConnection>>::new(db_url);
+//! #     config
+//! # }
+//! #
 //! # async fn run_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! #     use schema::users::dsl::*;
 //! #     let config = get_config();

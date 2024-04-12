@@ -284,3 +284,18 @@ impl<C> SyncConnectionWrapper<C> {
         }
     }
 }
+
+#[cfg(any(
+    feature = "deadpool",
+    feature = "bb8",
+    feature = "mobc",
+    feature = "r2d2"
+))]
+impl<C> crate::pooled_connection::PoolableConnection for SyncConnectionWrapper<C>
+where
+    Self: AsyncConnection,
+{
+    fn is_broken(&mut self) -> bool {
+        Self::TransactionManager::is_broken_transaction_manager(self)
+    }
+}
