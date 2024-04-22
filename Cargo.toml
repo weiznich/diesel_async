@@ -63,4 +63,4 @@ members = [
 ]
 
 [patch.crates-io]
-diesel = { git = "http://github.com/diesel-rs/diesel", rev = "793de72" }
+diesel = { git = "http://github.com/wattsense/diesel", "branch" = "optimize_owned_row"}
