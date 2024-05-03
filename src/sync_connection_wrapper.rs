@@ -134,10 +134,7 @@ where
         .boxed()
     }
 
-    fn execute_returning_count<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> Self::ExecuteFuture<'conn, 'query>
+    fn execute_returning_count<'query, T>(&mut self, source: T) -> Self::ExecuteFuture<'_, 'query>
     where
         T: QueryFragment<Self::Backend> + QueryId,
     {

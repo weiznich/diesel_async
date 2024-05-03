@@ -14,6 +14,7 @@ table! {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = users)]
 struct User {

@@ -100,7 +100,7 @@ jobs:
           echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
-        if: matrix.os == 'macos-latest' && matrix.backend == 'postgres'
+        if: matrix.os == 'macos-13' && matrix.backend == 'postgres'
         run: |
           initdb -D /usr/local/var/postgres
           pg_ctl -D /usr/local/var/postgres start
@@ -123,7 +123,7 @@ jobs:
           echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS)
-        if: matrix.os == 'macos-latest' && matrix.backend == 'mysql'
+        if: matrix.os == 'macos-13' && matrix.backend == 'mysql'
         run: |
           brew install mariadb@11.3
           /usr/local/opt/mariadb@11.3/bin/mysql_install_db
