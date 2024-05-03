@@ -102,8 +102,8 @@ jobs:
       - name: Install postgres (MacOS)
         if: matrix.os == 'macos-13' && matrix.backend == 'postgres'
         run: |
-          initdb -D /usr/local/var/postgres
-          pg_ctl -D /usr/local/var/postgres start
+          brew install postgresql@14
+          brew services start postgresql@14
           sleep 3
           createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
@@ -111,11 +111,12 @@ jobs:
       - name: Install postgres (MacOS M1)
         if: matrix.os == 'macos-14' && matrix.backend == 'postgres'
         run: |
-          brew install postgresql
+          brew install postgresql@14
           brew services start postgresql@14
           sleep 3
           createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
+
       - name: Install sqlite (MacOS)
         if: runner.os == 'macOS' && matrix.backend == 'sqlite'
         run: |
