@@ -65,7 +65,6 @@ pub type Hook<C> = deadpool::managed::Hook<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::HookError`] with [`diesel-async`]
 pub type HookError = deadpool::managed::HookError<super::PoolError>;
 
-#[async_trait::async_trait]
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + Send + 'static,
@@ -89,8 +88,8 @@ where
         _: &deadpool::managed::Metrics,
     ) -> deadpool::managed::RecycleResult<Self::Error> {
         if std::thread::panicking() || obj.is_broken() {
-            return Err(deadpool::managed::RecycleError::StaticMessage(
-                "Broken connection",
+            return Err(deadpool::managed::RecycleError::Message(
+                "Broken connection".into(),
             ));
         }
         obj.ping(&self.manager_config.recycling_method)
