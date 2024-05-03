@@ -22,7 +22,7 @@ jobs:
       matrix:
         rust: ["stable", "beta", "nightly"]
         backend: ["postgres", "mysql", "sqlite"]
-        os: [ubuntu-latest, macos-latest, macos-14, windows-2019]
+        os: [ubuntu-latest, macos-13, macos-14, windows-2019]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
@@ -100,10 +100,10 @@ jobs:
           echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
-        if: matrix.os == 'macos-latest' && matrix.backend == 'postgres'
+        if: matrix.os == 'macos-13' && matrix.backend == 'postgres'
         run: |
-          initdb -D /usr/local/var/postgres
-          pg_ctl -D /usr/local/var/postgres start
+          brew install postgresql@14
+          brew services start postgresql@14
           sleep 3
           createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
@@ -111,11 +111,12 @@ jobs:
       - name: Install postgres (MacOS M1)
         if: matrix.os == 'macos-14' && matrix.backend == 'postgres'
         run: |
-          brew install postgresql
+          brew install postgresql@14
           brew services start postgresql@14
           sleep 3
           createuser -s postgres
           echo "DATABASE_URL=postgres://postgres@localhost/" >> $GITHUB_ENV
+
       - name: Install sqlite (MacOS)
         if: runner.os == 'macOS' && matrix.backend == 'sqlite'
         run: |
@@ -123,7 +124,7 @@ jobs:
           echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS)
-        if: matrix.os == 'macos-latest' && matrix.backend == 'mysql'
+        if: matrix.os == 'macos-13' && matrix.backend == 'mysql'
         run: |
           brew install mariadb@11.3
           /usr/local/opt/mariadb@11.3/bin/mysql_install_db
