@@ -10,7 +10,7 @@ repository = "https://github.com/weiznich/diesel_async"
 keywords = ["orm", "database", "sql", "async"]
 categories = ["database"]
 description = "An async extension for Diesel the safe, extensible ORM and Query Builder"
-rust-version = "1.65.0"
+rust-version = "1.78.0"
 
 [dependencies]
 diesel = { version = "~2.1.1", default-features = false, features = [
@@ -95,4 +95,4 @@ members = [
 ]
 
 [patch.crates-io]
-diesel = { git = "http://github.com/diesel-rs/diesel", rev = "793de72" }
+diesel = { git = "http://github.com/diesel-rs/diesel", "rev" = "f2eb9b2"}
