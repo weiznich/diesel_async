@@ -8,6 +8,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 * Added type `diesel_async::pooled_connection::mobc::PooledConnection`
 * MySQL/MariaDB now use `CLIENT_FOUND_ROWS` capability to allow consistent behavior with PostgreSQL regarding return value of UPDATe commands.
+* The minimal supported rust version is now 1.78.0
 
 ## [0.4.1] - 2023-09-01
 
