@@ -316,7 +316,7 @@ pub trait PoolableConnection: AsyncConnection {
     async fn ping(&mut self, config: &RecyclingMethod<Self>) -> diesel::QueryResult<()>
     where
         for<'a> Self: 'a,
-        diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
             crate::methods::ExecuteDsl<Self>,
         diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<Self>,
     {

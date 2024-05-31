@@ -63,7 +63,7 @@ pub type Builder<C> = mobc::Builder<AsyncDieselConnectionManager<C>>;
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
-    diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+    diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
         crate::methods::ExecuteDsl<C>,
     diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {

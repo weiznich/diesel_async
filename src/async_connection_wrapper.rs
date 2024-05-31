@@ -289,7 +289,7 @@ mod implementation {
         C: crate::AsyncConnection<Backend = <Self as diesel::Connection>::Backend>
             + crate::pooled_connection::PoolableConnection
             + 'static,
-        diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
             crate::methods::ExecuteDsl<C>,
         diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<C>,
     {
