@@ -13,7 +13,7 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.78.0"
 
 [dependencies]
-diesel = { version = "~2.1.1", default-features = false, features = [
+diesel = { version = "~2.2.0", default-features = false, features = [
         "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ] }
 async-trait = "0.1.66"
@@ -47,8 +47,8 @@ scoped-futures = { version = "0.1", features = ["std"] }
 tokio = { version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"] }
 cfg-if = "1"
 chrono = "0.4"
-diesel = { version = "2.1.0", default-features = false, features = ["chrono"] }
-diesel_migrations = "2.1.0"
+diesel = { version = "2.2.0", default-features = false, features = ["chrono"] }
+diesel_migrations = "2.2.0"
 
 [features]
 default = []
@@ -94,5 +94,3 @@ members = [
         "examples/sync-wrapper",
 ]
 
-[patch.crates-io]
-diesel = { git = "http://github.com/diesel-rs/diesel", "rev" = "f2eb9b2"}

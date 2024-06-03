@@ -63,7 +63,7 @@ pub type RunError = bb8::RunError<super::PoolError>;
 impl<C> ManageConnection for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
-    diesel::dsl::BareSelect<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+    diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
         crate::methods::ExecuteDsl<C>,
     diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {
