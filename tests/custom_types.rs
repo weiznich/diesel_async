@@ -2,6 +2,7 @@ use crate::connection;
 use diesel::deserialize::{self, FromSql, FromSqlRow};
 use diesel::expression::{AsExpression, IntoSql};
 use diesel::pg::{Pg, PgValue};
+use diesel::query_builder::QueryId;
 use diesel::serialize::{self, IsNull, Output, ToSql};
 use diesel::sql_types::SqlType;
 use diesel::*;
@@ -17,7 +18,7 @@ table! {
     }
 }
 
-#[derive(SqlType)]
+#[derive(SqlType, QueryId)]
 #[diesel(postgres_type(name = "my_type"))]
 pub struct MyType;
 
