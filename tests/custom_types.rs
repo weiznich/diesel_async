@@ -70,7 +70,7 @@ async fn custom_types_round_trip() {
     let connection = &mut connection().await;
 
     // Try encoding an array to test type metadata lookup
-    let selected = select([MyEnum::Foo, MyEnum::Bar].into_sql::<sql_types::Array<MyType>>())
+    let selected = select(vec![MyEnum::Foo, MyEnum::Bar].into_sql::<sql_types::Array<MyType>>())
         .get_result(connection)
         .await
         .unwrap();
