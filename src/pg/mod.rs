@@ -403,7 +403,7 @@ impl AsyncPgConnection {
         to_sql_result: QueryResult<()>,
         collect_bind_result: QueryResult<()>,
         query_builder: PgQueryBuilder,
-        bind_collector: RawBytesBindCollector<Pg>,
+        mut bind_collector: RawBytesBindCollector<Pg>,
         metadata_lookup: PgAsyncMetadataLookup,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
