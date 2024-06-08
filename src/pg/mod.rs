@@ -345,10 +345,10 @@ impl AsyncPgConnection {
         Ok(())
     }
 
-    fn run_with_connection_future<'query, R>(
+    fn run_with_connection_future<'a, R: 'a>(
         &self,
-        future: impl Future<Output = QueryResult<R>> + Send + 'query,
-    ) -> BoxFuture<'query, QueryResult<R>> {
+        future: impl Future<Output = QueryResult<R>> + Send + 'a,
+    ) -> BoxFuture<'a, QueryResult<R>> {
         let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
         drive_future(connection_future, future).boxed()
     }
@@ -370,12 +370,9 @@ impl AsyncPgConnection {
         // which both are `Send`.
         // We also collect the query id (essentially an integer) and the safe_to_cache flag here
         // so there is no need to even access the query in the async block below
-        let is_safe_to_cache_prepared = query.is_safe_to_cache_prepared(&diesel::pg::Pg);
         let mut query_builder = PgQueryBuilder::default();
-        let to_sql_sql = query.to_sql(&mut query_builder, &Pg);
 
         let mut bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
-        let query_id = T::query_id();
 
         // we don't resolve custom types here yet, we do that later
         // in the async block below as we might need to perform lookup
@@ -384,30 +381,30 @@ impl AsyncPgConnection {
         // We apply this workaround to prevent requiring all the diesel
         // serialization code to beeing async
         let mut metadata_lookup = PgAsyncMetadataLookup::new();
-        let collect_bind_result =
-            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
 
         // The code that doesn't need the `T` generic parameter is in a separate function to reduce LLVM IR lines
         self.with_prepared_statement_after_sql_built(
-            is_safe_to_cache_prepared,
+            callback,
+            query.is_safe_to_cache_prepared(&Pg),
+            T::query_id(),
+            query.to_sql(&mut query_builder, &Pg),
+            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg),
             query_builder,
-            to_sql_result,
             bind_collector,
-            query_id,
             metadata_lookup,
-            collect_bind_result,
         )
     }
 
     fn with_prepared_statement_after_sql_built<'a, F, R>(
         &mut self,
+        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F + Send + 'a,
         is_safe_to_cache_prepared: QueryResult<bool>,
-        query_builder: PgQueryBuilder,
-        to_sql_result: QueryResult<()>,
-        bind_collector: RawBytesBindCollector<Pg>,
         query_id: Option<std::any::TypeId>,
-        metadata_lookup: PgAsyncMetadataLookup,
+        to_sql_result: QueryResult<()>,
         collect_bind_result: QueryResult<()>,
+        query_builder: PgQueryBuilder,
+        bind_collector: RawBytesBindCollector<Pg>,
+        metadata_lookup: PgAsyncMetadataLookup,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         F: Future<Output = QueryResult<R>> + Send,
