@@ -1,6 +1,6 @@
 use crate::connection;
 use diesel::deserialize::{self, FromSql, FromSqlRow};
-use diesel::expression::AsExpression;
+use diesel::expression::{AsExpression, IntoSql};
 use diesel::pg::{Pg, PgValue};
 use diesel::serialize::{self, IsNull, Output, ToSql};
 use diesel::sql_types::SqlType;
@@ -68,6 +68,14 @@ async fn custom_types_round_trip() {
         },
     ];
     let connection = &mut connection().await;
+
+    // Try encoding an array to test type metadata lookup
+    let selected = select([MyEnum::Foo, MyEnum::Bar].into_sql::<sql_types::Array<MyType>>())
+        .get_result(connection)
+        .await
+        .unwrap();
+    assert_eq!(vec![MyEnum::Foo, MyEnum::Bar], selected);
+
     connection
         .batch_execute(
             r#"
