@@ -72,7 +72,7 @@ async fn custom_types_round_trip() {
 
     // Try encoding an array to test type metadata lookup
     let selected = select(vec![MyEnum::Foo, MyEnum::Bar].into_sql::<sql_types::Array<MyType>>())
-        .get_result(connection)
+        .get_result::<Vec<MyEnum>>(connection)
         .await
         .unwrap();
     assert_eq!(vec![MyEnum::Foo, MyEnum::Bar], selected);
