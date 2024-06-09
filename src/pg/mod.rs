@@ -410,7 +410,7 @@ impl AsyncPgConnection {
                 let metadata_cache = &mut *metadata_cache.lock().await;
                 let real_oids = HashMap::<u32, u32>::new();
 
-                for (index, (ref schema, ref lookup_type_name) in metadata_lookup.unresolved_types.into_iter().enumerate() {
+                for (index, (ref schema, ref lookup_type_name)) in metadata_lookup.unresolved_types.into_iter().enumerate() {
                     // for each unresolved item
                     // we check whether it's arleady in the cache
                     // or perform a lookup and insert it into the cache
