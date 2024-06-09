@@ -24,6 +24,7 @@ use futures_util::stream::{BoxStream, TryStreamExt};
 use futures_util::TryFutureExt;
 use futures_util::{Future, FutureExt, StreamExt};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -367,9 +368,28 @@ impl AsyncPgConnection {
         //
         // We apply this workaround to prevent requiring all the diesel
         // serialization code to beeing async
-        let mut metadata_lookup = PgAsyncMetadataLookup::new();
-        let collect_bind_result =
-            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
+        let mut dummy_lookup = SameOidEveryTime {
+            first_byte: 0,
+        };
+        let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+        let collect_bind_result_0 = query.collect_binds(&mut bind_collector_0, &mut dummy_lookup, &Pg);
+
+        dummy_lookup.first_byte = 1;
+        let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+        let collect_bind_result_1 = query.collect_binds(&mut bind_collector_1, &mut dummy_lookup, &Pg);
+
+        let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0.metadata);
+        let collect_bind_result = query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
+
+        let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
+            .enumerate()
+            .flat_map(|(bind_index, (bytes_0, bytes_1))|) {
+                std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
+                    .enumerate()
+                    .filter_map(|(byte_index, bytes)| (bytes == (0, 1)).then_some((bind_index, byte_index)))
+            }
+            // Avoid storing the bind collectors in the returned Future
+            .collect::<Vec<_>>();
 
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
@@ -379,6 +399,8 @@ impl AsyncPgConnection {
         async move {
             let sql = sql?;
             let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
+            collect_bind_result_0?;
+            collect_bind_result_1?;
             collect_bind_result?;
             // Check whether we need to resolve some types at all
             //
@@ -386,34 +408,58 @@ impl AsyncPgConnection {
             // to borther with that at all
             if !metadata_lookup.unresolved_types.is_empty() {
                 let metadata_cache = &mut *metadata_cache.lock().await;
-                let mut next_unresolved = metadata_lookup.unresolved_types.into_iter();
-                for m in &mut bind_collector.metadata {
+                let real_oids = HashMap::<u32, u32>::new();
+
+                for (index, (ref schema, ref lookup_type_name) in metadata_lookup.unresolved_types.into_iter().enumerate() {
                     // for each unresolved item
                     // we check whether it's arleady in the cache
                     // or perform a lookup and insert it into the cache
-                    if m.oid().is_err() {
-                        if let Some((ref schema, ref lookup_type_name)) = next_unresolved.next() {
-                            let cache_key = PgMetadataCacheKey::new(
-                                schema.as_ref().map(Into::into),
-                                lookup_type_name.into(),
-                            );
-                            if let Some(entry) = metadata_cache.lookup_type(&cache_key) {
-                                *m = entry;
-                            } else {
-                                let type_metadata = lookup_type(
-                                    schema.clone(),
-                                    lookup_type_name.clone(),
-                                    &raw_connection,
-                                )
-                                .await?;
-                                *m = PgTypeMetadata::from_result(Ok(type_metadata));
+                    let cache_key = PgMetadataCacheKey::new(
+                        schema.as_ref().map(Into::into),
+                        lookup_type_name.into(),
+                    );
+                    let real_metadata = if let Some(type_metadata) = metadata_cache.lookup_type(&cache_key) {
+                        type_metadata
+                    } else {
+                        let type_metadata = lookup_type(
+                            schema.clone(),
+                            lookup_type_name.clone(),
+                            &raw_connection,
+                        )
+                        .await?;
+                        metadata_cache.store_type(cache_key, type_metadata);
 
-                                metadata_cache.store_type(cache_key, type_metadata);
-                            }
-                        } else {
-                            break;
-                        }
-                    }
+                        PgTypeMetadata::from_result(Ok(type_metadata))
+                    };
+                    let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
+                    real_oids.extend([
+                        (fake_oid, real_metadata.oid()?),
+                        (fake_array_oid, real_metadata.array_oid()?),
+                    ]);
+                }
+
+                // Replace fake OIDs with real OIDs in `bind_collector.metadata`
+                for m in &mut bind_collector.metadata {
+                    let [oid, array_oid] = [m.oid()?, m.array_oid()?]
+                        .map(|oid| {
+                            real_oids
+                                .get(&oid)
+                                .copied()
+                                // If `oid` is not a key in `real_oids`, then `HasSqlType::metadata` returned it as a
+                                // hardcoded value instead of being lied to by `PgAsyncMetadataLookup`. In this case,
+                                // the existing value is already the real OID, so it's kept.
+                                .unwrap_or(oid)
+                        });
+                    *m = PgTypeMetadata::new(oid, array_oid);
+                }
+                // Replace fake OIDs with real OIDs in `bind_collector.binds`
+                for location in fake_oid_locations {
+                    replace_fake_oid(&mut bind_collector.binds, &real_oids, location)
+                        .ok_or_else(|| {
+                            Error::SerializationError(
+                                format!("diesel_async failed to replace a type OID serialized in bind value {bind_index}").into(),
+                            )
+                        });
                 }
             }
             let key = match query_id {
@@ -452,15 +498,29 @@ impl AsyncPgConnection {
     }
 }
 
+/// Collects types that need to be looked up, and causes fake OIDs to be written into the bind collector
+/// so they can be replaced with asynchronously fetched OIDs after the original query is dropped
 struct PgAsyncMetadataLookup {
     unresolved_types: Vec<(Option<String>, String)>,
+    min_fake_oid: u32,
 }
 
 impl PgAsyncMetadataLookup {
-    fn new() -> Self {
+    fn new(metadata_0: &[PgTypeMetadata]) -> Self {
+        let max_hardcoded_oid = metadata_0
+            .iter()
+            .flat_map(|m| [m.oid().unwrap_or(0), m.array_oid().unwrap_or(0)])
+            .max()
+            .unwrap_or(0);
         Self {
             unresolved_types: Vec::new(),
+            min_fake_oid: max_hardcoded_oid + 1,
         }
+    }
+
+    fn fake_oids(&self, index: usize) -> (u32, u32) {
+        let oid = self.min_fake_oid + ((index as u32) * 2);
+        (oid, oid + 1)
     }
 }
 
@@ -470,9 +530,24 @@ impl PgMetadataLookup for PgAsyncMetadataLookup {
             PgMetadataCacheKey::new(schema.map(Cow::Borrowed), Cow::Borrowed(type_name));
 
         let cache_key = cache_key.into_owned();
+        let index = self.unresolved_types.len();
         self.unresolved_types
             .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
-        PgTypeMetadata::from_result(Err(FailedToLookupTypeError::new(cache_key)))
+        PgTypeMetadata::from_result(Ok(self.fake_oids(index)))
+    }
+}
+
+/// Allows unambiguously determining:
+/// * where OIDs are written in `bind_collector.binds` after being returned by `lookup_type`
+/// * determining the maximum hardcoded OID in `bind_collector.metadata`
+struct SameOidEveryTime {
+    first_byte: u8,
+}
+
+impl PgMetadataLookup for SameOidEveryTime {
+    fn lookup_type(&mut self, _type_name: &str, _schema: Option<&str>) -> PgTypeMetadata {
+        let oid = u32::from_be_bytes([self.first_byte, 0, 0, 0]);
+        PgTypeMetadata::new(oid, oid)
     }
 }
 
@@ -504,6 +579,20 @@ async fn lookup_type(
             .map_err(ErrorHelper)?
     };
     Ok((r.get(0), r.get(1)))
+}
+
+fn replace_fake_oid(
+    binds: &mut Vec<Option<Vec<u8>>>,
+    real_oids: HashMap<u32, u32>,
+    (bind_index, byte_index): (u32, u32),
+) -> Option<()> {
+    let serialized_oid = binds
+        .get_mut(bind_index)?
+        .as_mut()?
+        .get_mut(byte_index..)?
+        .first_chunk_mut::<4>()?;
+    *serialized_oid = real_oids.get(&u32::from_be_bytes(*serialized_oid))?.to_be_bytes();
+    Some(())
 }
 
 async fn drive_future<R>(
