@@ -16,14 +16,13 @@ use diesel::pg::{
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
-use diesel::result::DatabaseErrorKind;
+use diesel::result::{DatabaseErrorKind, Error};
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
 use futures_util::future::BoxFuture;
 use futures_util::future::Either;
 use futures_util::stream::{BoxStream, TryStreamExt};
 use futures_util::TryFutureExt;
 use futures_util::{Future, FutureExt, StreamExt};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -432,6 +431,7 @@ impl AsyncPgConnection {
                         PgTypeMetadata::from_result(Ok(type_metadata))
                     };
                     let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
+                    let [real_oid, real_array_oid] = unwrap_oids(&real_metadata);
                     real_oids.extend([
                         (fake_oid, real_metadata.oid()?),
                         (fake_array_oid, real_metadata.array_oid()?),
@@ -440,7 +440,7 @@ impl AsyncPgConnection {
 
                 // Replace fake OIDs with real OIDs in `bind_collector.metadata`
                 for m in &mut bind_collector.metadata {
-                    let [oid, array_oid] = [m.oid()?, m.array_oid()?]
+                    let [oid, array_oid] = unwrap_oids(&m)
                         .map(|oid| {
                             real_oids
                                 .get(&oid)
@@ -453,8 +453,8 @@ impl AsyncPgConnection {
                     *m = PgTypeMetadata::new(oid, array_oid);
                 }
                 // Replace fake OIDs with real OIDs in `bind_collector.binds`
-                for location in fake_oid_locations {
-                    replace_fake_oid(&mut bind_collector.binds, &real_oids, location)
+                for (bind_index, byte_index) in fake_oid_locations {
+                    replace_fake_oid(&mut bind_collector.binds, &real_oids, bind_index, byte_index)
                         .ok_or_else(|| {
                             Error::SerializationError(
                                 format!("diesel_async failed to replace a type OID serialized in bind value {bind_index}").into(),
@@ -577,10 +577,16 @@ async fn lookup_type(
     Ok((r.get(0), r.get(1)))
 }
 
+fn unwrap_oids(metadata: &PgTypeMetadata) -> [u32; 2] {
+    [metadata.oid(), metadata.array_oid()]
+        .map(|oid| oid.expect("PgTypeMetadata is supposed to always be Ok here"))
+}
+
 fn replace_fake_oid(
     binds: &mut [Option<Vec<u8>>],
-    real_oids: HashMap<u32, u32>,
-    (bind_index, byte_index): (usize, usize),
+    real_oids: &HashMap<u32, u32>,
+    bind_index: usize,
+    byte_index: usize,
 ) -> Option<()> {
     let serialized_oid = binds
         .get_mut(bind_index)?
