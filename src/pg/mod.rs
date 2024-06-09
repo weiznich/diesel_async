@@ -11,8 +11,8 @@ use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
 use diesel::pg::{
-    FailedToLookupTypeError, Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup,
-    PgQueryBuilder, PgTypeMetadata,
+    Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder,
+    PgTypeMetadata,
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
@@ -383,11 +383,11 @@ impl AsyncPgConnection {
 
         let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
             .enumerate()
-            .flat_map(|(bind_index, (bytes_0, bytes_1))|) {
+            .flat_map(|(bind_index, (bytes_0, bytes_1))| {
                 std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
                     .enumerate()
                     .filter_map(|(byte_index, bytes)| (bytes == (0, 1)).then_some((bind_index, byte_index)))
-            }
+            })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
 
@@ -526,10 +526,6 @@ impl PgAsyncMetadataLookup {
 
 impl PgMetadataLookup for PgAsyncMetadataLookup {
     fn lookup_type(&mut self, type_name: &str, schema: Option<&str>) -> PgTypeMetadata {
-        let cache_key =
-            PgMetadataCacheKey::new(schema.map(Cow::Borrowed), Cow::Borrowed(type_name));
-
-        let cache_key = cache_key.into_owned();
         let index = self.unresolved_types.len();
         self.unresolved_types
             .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
@@ -582,9 +578,9 @@ async fn lookup_type(
 }
 
 fn replace_fake_oid(
-    binds: &mut Vec<Option<Vec<u8>>>,
+    binds: &mut [Option<Vec<u8>>],
     real_oids: HashMap<u32, u32>,
-    (bind_index, byte_index): (u32, u32),
+    (bind_index, byte_index): (usize, usize),
 ) -> Option<()> {
     let serialized_oid = binds
         .get_mut(bind_index)?
