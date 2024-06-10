@@ -436,10 +436,10 @@ impl AsyncPgConnection {
                     };
                     let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
                     let [real_oid, real_array_oid] = unwrap_oids(&real_metadata);
-                    real_oids.extend([
+                    real_oids.extend(dbg!([
                         (fake_oid, real_oid),
                         (fake_array_oid, real_array_oid),
-                    ]);
+                    ]));
                 }
 
                 // Replace fake OIDs with real OIDs in `bind_collector.metadata`
@@ -452,7 +452,7 @@ impl AsyncPgConnection {
                                 // If `oid` is not a key in `real_oids`, then `HasSqlType::metadata` returned it as a
                                 // hardcoded value instead of being lied to by `PgAsyncMetadataLookup`. In this case,
                                 // the existing value is already the real OID, so it's kept.
-                                .unwrap_or(dbg!(oid))
+                                .unwrap_or_else(|| dbg!(oid))
                         });
                     *m = PgTypeMetadata::new(oid, array_oid);
                 }
