@@ -433,8 +433,8 @@ impl AsyncPgConnection {
                     let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
                     let [real_oid, real_array_oid] = unwrap_oids(&real_metadata);
                     real_oids.extend([
-                        (fake_oid, real_metadata.oid()?),
-                        (fake_array_oid, real_metadata.array_oid()?),
+                        (fake_oid, real_oid),
+                        (fake_array_oid, real_array_oid),
                     ]);
                 }
 
@@ -578,7 +578,7 @@ async fn lookup_type(
 }
 
 fn unwrap_oids(metadata: &PgTypeMetadata) -> [u32; 2] {
-    [metadata.oid(), metadata.array_oid()]
+    [metadata.oid().ok(), metadata.array_oid().ok()]
         .map(|oid| oid.expect("PgTypeMetadata is supposed to always be Ok here"))
 }
 
