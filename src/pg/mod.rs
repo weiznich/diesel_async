@@ -379,6 +379,9 @@ impl AsyncPgConnection {
 
         let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0.metadata);
         let collect_bind_result = query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
+        dbg!(&bind_collector.binds);
+        dbg!(&bind_collector_0.binds);
+        dbg!(&bind_collector_1.binds);
 
         let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
             .enumerate()
@@ -389,6 +392,7 @@ impl AsyncPgConnection {
             })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
+        dbg!(&fake_oid_locations);
 
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
