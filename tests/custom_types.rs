@@ -4,7 +4,7 @@ use diesel::expression::{AsExpression, IntoSql};
 use diesel::pg::{Pg, PgValue};
 use diesel::query_builder::QueryId;
 use diesel::serialize::{self, IsNull, Output, ToSql};
-use diesel::sql_types::SqlType;
+use diesel::sql_types::{Array, Integer, SqlType};
 use diesel::*;
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 use std::io::Write;
@@ -70,13 +70,6 @@ async fn custom_types_round_trip() {
     ];
     let connection = &mut connection().await;
 
-    // Try encoding an array to test type metadata lookup
-    let selected = select(vec![MyEnum::Foo, MyEnum::Bar].into_sql::<sql_types::Array<MyType>>())
-        .get_result::<Vec<MyEnum>>(connection)
-        .await
-        .unwrap();
-    assert_eq!(vec![MyEnum::Foo, MyEnum::Bar], selected);
-
     connection
         .batch_execute(
             r#"
@@ -89,6 +82,16 @@ async fn custom_types_round_trip() {
         )
         .await
         .unwrap();
+
+    // Try encoding arrays to test type metadata lookup
+    let selected_data = (vec![MyEnum::Foo, MyEnum::Bar], vec![0i32], vec![vec![MyEnum::Foo]]);
+    let selected = select(
+        selected_data.as_sql::<(Array<MyType>, Array<Integer>, Array<Array<MyType>>)>(),
+    )
+    .get_result::<(Vec<MyEnum>, Vec<i32>, Vec<Vec<MyEnum>>)>(connection)
+    .await
+    .unwrap();
+    assert_eq!(selected_data, selected);
 
     let inserted = insert_into(custom_types::table)
         .values(&data)
