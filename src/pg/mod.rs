@@ -389,8 +389,8 @@ impl AsyncPgConnection {
             .flat_map(|(bind_index, (bytes_0, bytes_1))| {
                 std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
                     .enumerate()
-                    .filter(|(_, bytes)| bytes == (0, 1))
-                    .map(|(byte_index, _)| (*bind_index, byte_index))
+                    .filter(|&(_, bytes)| bytes == (0, 1))
+                    .map(move |(byte_index, _)| (bind_index, byte_index))
             })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
