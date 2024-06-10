@@ -599,7 +599,9 @@ fn replace_fake_oid(
         .as_mut()?
         .get_mut(byte_index..)?
         .first_chunk_mut::<4>()?;
-    *serialized_oid = real_oids.get(&u32::from_be_bytes(*serialized_oid))?.to_be_bytes();
+    *serialized_oid = real_oids
+        .get(&u32::from_be_bytes(*serialized_oid))?
+        .to_be_bytes();
     Some(())
 }
 
