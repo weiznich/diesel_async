@@ -385,7 +385,7 @@ impl AsyncPgConnection {
             .flat_map(|(bind_index, (bytes_0, bytes_1))| {
                 std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
                     .enumerate()
-                    .filter_map(|(byte_index, bytes)| (bytes == (0, 1)).then_some((bind_index, byte_index)))
+                    .filter_map(move |(byte_index, bytes)| (bytes == (0, 1)).then_some((bind_index, byte_index)))
             })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
@@ -407,9 +407,9 @@ impl AsyncPgConnection {
             // to borther with that at all
             if !metadata_lookup.unresolved_types.is_empty() {
                 let metadata_cache = &mut *metadata_cache.lock().await;
-                let real_oids = HashMap::<u32, u32>::new();
+                let mut real_oids = HashMap::<u32, u32>::new();
 
-                for (index, (ref schema, ref lookup_type_name)) in metadata_lookup.unresolved_types.into_iter().enumerate() {
+                for (index, (schema, lookup_type_name)) in metadata_lookup.unresolved_types.iter().enumerate() {
                     // for each unresolved item
                     // we check whether it's arleady in the cache
                     // or perform a lookup and insert it into the cache
