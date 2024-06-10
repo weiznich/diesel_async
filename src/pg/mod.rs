@@ -459,7 +459,7 @@ impl AsyncPgConnection {
                             Error::SerializationError(
                                 format!("diesel_async failed to replace a type OID serialized in bind value {bind_index}").into(),
                             )
-                        });
+                        })?;
                 }
             }
             let key = match query_id {
