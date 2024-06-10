@@ -89,7 +89,7 @@ async fn custom_types_round_trip() {
         //selected_data.clone().into_sql::<(Array<MyType>, Array<Integer>, Array<Array<MyType>>)>(),
         (
             //selected_data.0.clone().into_sql::<(Array<MyType>)>(),
-            selected_data.1.clone().into_sql::<(Array<Array<Integer>>)>(),
+            selected_data.0.clone().into_sql::<(Array<Array<Integer>>)>(),
             //selected_data.2.clone().into_sql::<(Array<Array<MyType>>)>(),
         )
     )
