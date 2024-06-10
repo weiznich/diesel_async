@@ -84,19 +84,15 @@ async fn custom_types_round_trip() {
         .unwrap();
 
     // Try encoding arrays to test type metadata lookup
-    let selected_data = (/*vec![MyEnum::Foo, MyEnum::Bar],*/ vec![vec![0i32]],);//, vec![vec![MyEnum::Foo]]);
-    let selected = select(
-        //selected_data.clone().into_sql::<(Array<MyType>, Array<Integer>, Array<Array<MyType>>)>(),
-        (
-            //selected_data.0.clone().into_sql::<(Array<MyType>)>(),
-            selected_data.0.clone().into_sql::<(Array<Array<Integer>>)>(),
-            //selected_data.2.clone().into_sql::<(Array<Array<MyType>>)>(),
-        )
-    )
-    .get_result::<(/*Vec<MyEnum>,*/ Vec<Vec<i32>>,/* Vec<Vec<MyEnum>>*/)>(connection)
+    let selected = select((
+        vec![MyEnum::Foo].into_sql::<(Array<MyType>)>(),
+        vec![0i32].into_sql::<(Array<Integer>)>(),
+        vec![MyEnum::Bar].into_sql::<(Array<MyType>)>(),
+    ))
+    .get_result::<(Vec<MyEnum>, Vec<i32>, Vec<MyEnum>)>(connection)
     .await
     .unwrap();
-    assert_eq!(selected_data, selected);
+    assert_eq!((vec![MyEnum::Foo], vec![0], vec![MyEnum::Bar]), selected);
 
     let inserted = insert_into(custom_types::table)
         .values(&data)
