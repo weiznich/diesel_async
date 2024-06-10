@@ -22,7 +22,7 @@ table! {
 #[diesel(postgres_type(name = "my_type"))]
 pub struct MyType;
 
-#[derive(Debug, PartialEq, FromSqlRow, AsExpression)]
+#[derive(Clone, Debug, PartialEq, FromSqlRow, AsExpression)]
 #[diesel(sql_type = MyType)]
 pub enum MyEnum {
     Foo,
