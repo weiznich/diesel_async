@@ -379,9 +379,9 @@ impl AsyncPgConnection {
 
         let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0.metadata);
         let collect_bind_result = query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
-        dbg!(&bind_collector.binds);
-        dbg!(&bind_collector_0.binds);
-        dbg!(&bind_collector_1.binds);
+        //dbg!(&bind_collector.binds);
+        //dbg!(&bind_collector_0.binds);
+        //dbg!(&bind_collector_1.binds);
 
         let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
             .enumerate()
@@ -392,7 +392,7 @@ impl AsyncPgConnection {
             })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
-        dbg!(&fake_oid_locations);
+        //dbg!(&fake_oid_locations);
 
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
@@ -452,7 +452,7 @@ impl AsyncPgConnection {
                                 // If `oid` is not a key in `real_oids`, then `HasSqlType::metadata` returned it as a
                                 // hardcoded value instead of being lied to by `PgAsyncMetadataLookup`. In this case,
                                 // the existing value is already the real OID, so it's kept.
-                                .unwrap_or(oid)
+                                .unwrap_or(dbg!(oid))
                         });
                     *m = PgTypeMetadata::new(oid, array_oid);
                 }
@@ -533,6 +533,7 @@ impl PgMetadataLookup for PgAsyncMetadataLookup {
         let index = self.unresolved_types.len();
         self.unresolved_types
             .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
+        dbg!(index, self.fake_oids(index));
         PgTypeMetadata::from_result(Ok(self.fake_oids(index)))
     }
 }
