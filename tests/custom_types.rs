@@ -84,7 +84,7 @@ async fn custom_types_round_trip() {
         .unwrap();
 
     // Try encoding arrays to test type metadata lookup
-    let selected_data = (/*vec![MyEnum::Foo, MyEnum::Bar],*/ vec![vec![0i32]]);//, vec![vec![MyEnum::Foo]]);
+    let selected_data = (/*vec![MyEnum::Foo, MyEnum::Bar],*/ vec![vec![0i32]],);//, vec![vec![MyEnum::Foo]]);
     let selected = select(
         //selected_data.clone().into_sql::<(Array<MyType>, Array<Integer>, Array<Array<MyType>>)>(),
         (
