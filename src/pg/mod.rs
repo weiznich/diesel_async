@@ -11,8 +11,7 @@ use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
 use diesel::pg::{
-    Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder,
-    PgTypeMetadata,
+    Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder, PgTypeMetadata,
 };
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
@@ -367,32 +366,34 @@ impl AsyncPgConnection {
         //
         // We apply this workaround to prevent requiring all the diesel
         // serialization code to beeing async
-        let mut dummy_lookup = SameOidEveryTime {
-            first_byte: 0,
-        };
         let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-        let collect_bind_result_0 = query.collect_binds(&mut bind_collector_0, &mut dummy_lookup, &Pg);
+        let collect_bind_result_0 = query.collect_binds(
+            &mut bind_collector_0,
+            &mut SameOidEveryTime { first_byte: 0 },
+            &Pg,
+        );
 
-        dummy_lookup.first_byte = 1;
         let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-        let collect_bind_result_1 = query.collect_binds(&mut bind_collector_1, &mut dummy_lookup, &Pg);
+        let collect_bind_result_1 = query.collect_binds(
+            &mut bind_collector_1,
+            &mut SameOidEveryTime { first_byte: 1 },
+            &Pg,
+        );
 
-        let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0.metadata);
-        let collect_bind_result = query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
-        //dbg!(&bind_collector.binds);
-        //dbg!(&bind_collector_0.binds);
-        //dbg!(&bind_collector_1.binds);
+        let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0);
+        let collect_bind_result =
+            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
 
         let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
             .enumerate()
             .flat_map(|(bind_index, (bytes_0, bytes_1))| {
                 std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
                     .enumerate()
-                    .filter_map(move |(byte_index, bytes)| (bytes == (0, 1)).then_some((bind_index, byte_index)))
+                    .filter(|(_, bytes)| bytes == (0, 1))
+                    .map(|(byte_index, _)| (*bind_index, byte_index))
             })
             // Avoid storing the bind collectors in the returned Future
             .collect::<Vec<_>>();
-        //dbg!(&fake_oid_locations);
 
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
@@ -436,10 +437,10 @@ impl AsyncPgConnection {
                     };
                     let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
                     let [real_oid, real_array_oid] = unwrap_oids(&real_metadata);
-                    real_oids.extend(dbg!([
+                    real_oids.extend([
                         (fake_oid, real_oid),
                         (fake_array_oid, real_array_oid),
-                    ]));
+                    ]);
                 }
 
                 // Replace fake OIDs with real OIDs in `bind_collector.metadata`
@@ -452,7 +453,7 @@ impl AsyncPgConnection {
                                 // If `oid` is not a key in `real_oids`, then `HasSqlType::metadata` returned it as a
                                 // hardcoded value instead of being lied to by `PgAsyncMetadataLookup`. In this case,
                                 // the existing value is already the real OID, so it's kept.
-                                .unwrap_or_else(|| dbg!(oid))
+                                .unwrap_or(oid)
                         });
                     *m = PgTypeMetadata::new(oid, array_oid);
                 }
@@ -510,8 +511,9 @@ struct PgAsyncMetadataLookup {
 }
 
 impl PgAsyncMetadataLookup {
-    fn new(metadata_0: &[PgTypeMetadata]) -> Self {
-        let max_hardcoded_oid = metadata_0
+    fn new(bind_collector_0: &RawBytesBindCollector<Pg>) -> Self {
+        let max_hardcoded_oid = bind_collector_0
+            .metadata
             .iter()
             .flat_map(|m| [m.oid().unwrap_or(0), m.array_oid().unwrap_or(0)])
             .max()
@@ -533,7 +535,6 @@ impl PgMetadataLookup for PgAsyncMetadataLookup {
         let index = self.unresolved_types.len();
         self.unresolved_types
             .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
-        dbg!(index, self.fake_oids(index));
         PgTypeMetadata::from_result(Ok(self.fake_oids(index)))
     }
 }
@@ -598,7 +599,7 @@ fn replace_fake_oid(
         .as_mut()?
         .get_mut(byte_index..)?
         .first_chunk_mut::<4>()?;
-    //*serialized_oid = real_oids.get(&u32::from_be_bytes(*serialized_oid))?.to_be_bytes();
+    *serialized_oid = real_oids.get(&u32::from_be_bytes(*serialized_oid))?.to_be_bytes();
     Some(())
 }
 
