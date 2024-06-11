@@ -360,7 +360,7 @@ impl AsyncPgConnection {
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId,
-        F: Future<Output = QueryResult<R>> + Send,
+        F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
         // we explicilty descruct the query here before going into the async block
@@ -407,7 +407,7 @@ impl AsyncPgConnection {
         metadata_lookup: PgAsyncMetadataLookup,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
-        F: Future<Output = QueryResult<R>> + Send,
+        F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
         let raw_connection = self.conn.clone();
