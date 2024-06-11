@@ -356,7 +356,7 @@ impl AsyncPgConnection {
     fn with_prepared_statement<'a, T, F, R>(
         &mut self,
         query: T,
-        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F + Send + 'a,
+        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId,
