@@ -397,7 +397,7 @@ impl AsyncPgConnection {
 
     fn with_prepared_statement_after_sql_built<'a, F, R>(
         &mut self,
-        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F + Send + 'a,
+        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
         is_safe_to_cache_prepared: QueryResult<bool>,
         query_id: Option<std::any::TypeId>,
         to_sql_result: QueryResult<()>,
