@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      - 0.3.x
+      - 0.4.x
       - 0.2.x
 
 name: CI Tests
@@ -137,13 +139,13 @@ jobs:
       - name: Install mysql (MacOS M1)
         if: matrix.os == 'macos-14' && matrix.backend == 'mysql'
         run: |
-          brew install mariadb@11.3
-          ls /opt/homebrew/opt/mariadb@11.3
-          /opt/homebrew/opt/mariadb@11.3/bin/mysql_install_db
-          /opt/homebrew/opt/mariadb@11.3/bin/mysql.server start
+          brew install mariadb@11.2
+          ls /opt/homebrew/opt/mariadb@11.2
+          /opt/homebrew/opt/mariadb@11.2/bin/mysql_install_db
+          /opt/homebrew/opt/mariadb@11.2/bin/mysql.server start
           sleep 3
-          /opt/homebrew/opt/mariadb@11.3/bin/mysqladmin -u runner password diesel
-          /opt/homebrew/opt/mariadb@11.3/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
+          /opt/homebrew/opt/mariadb@11.2/bin/mysqladmin -u runner password diesel
+          /opt/homebrew/opt/mariadb@11.2/bin/mysql -e "create database diesel_test; create database diesel_unit_test; grant all on \`diesel_%\`.* to 'runner'@'localhost';" -urunner
           echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install postgres (Windows)
