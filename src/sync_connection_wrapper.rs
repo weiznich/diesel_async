@@ -206,9 +206,11 @@ impl<C> SyncConnectionWrapper<C> {
     {
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
-            let mut inner = inner
-                .lock()
-                .expect("Mutex is poisoned, a thread must have panicked holding it.");
+            let mut inner = inner.lock().unwrap_or_else(|poison| {
+                // try to be resilient by providing the guard
+                inner.clear_poison();
+                poison.into_inner()
+            });
             task(&mut inner)
         })
         .unwrap_or_else(|err| QueryResult::Err(from_tokio_join_error(err)))
@@ -239,9 +241,11 @@ impl<C> SyncConnectionWrapper<C> {
 
         let (collect_bind_result, collector_data) = {
             let exclusive = self.inner.clone();
-            let mut inner = exclusive
-                .lock()
-                .expect("Mutex is poisoned, a thread must have panicked holding it.");
+            let mut inner = exclusive.lock().unwrap_or_else(|poison| {
+                // try to be resilient by providing the guard
+                exclusive.clear_poison();
+                poison.into_inner()
+            });
             let mut bind_collector =
                 <<C::Backend as Backend>::BindCollector<'_> as Default>::default();
             let metadata_lookup = inner.metadata_lookup();
