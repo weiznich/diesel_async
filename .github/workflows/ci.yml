@@ -43,9 +43,18 @@ jobs:
 
       - name: Set environment variables
         shell: bash
+        if: matrix.backend == 'postgres' && matrix.os == 'windows-2019'
+        run: |
+          echo "AWS_LC_SYS_NO_ASM=1"
+
+      - name: Set environment variables
+        shell: bash
         if: matrix.rust == 'nightly'
         run: |
           echo "RUSTFLAGS=--cap-lints=warn" >> $GITHUB_ENV
+
+      - uses: ilammy/setup-nasm@v1
+        if: matrix.backend == 'postgres' && matrix.os == 'windows-2019'
 
       - name: Install postgres (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'postgres'
