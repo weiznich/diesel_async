@@ -1,4 +1,4 @@
-#![cfg_attr(doc_cfg, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 //! Diesel-async provides async variants of diesel related query functionality
 //!
 //! diesel-async is an extension to diesel itself. It is designed to be used together

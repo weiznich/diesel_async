@@ -84,8 +84,8 @@ features = [
         "r2d2",
 ]
 no-default-features = true
-rustc-args = ["--cfg", "doc_cfg"]
-rustdoc-args = ["--cfg", "doc_cfg"]
+rustc-args = ["--cfg", "docsrs"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace]
 members = [
