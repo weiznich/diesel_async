@@ -168,6 +168,11 @@ let mut conn = pool.get().await?;
 let res = users::table.select(User::as_select()).load::(&mut conn).await?;
 ```
 
+## Diesel-Async with Secure Database
+
+In the event of using this crate with a `sslmode=require` flag, it will be necessary to build a TLS cert.
+There is an example provided for doing this using the `rustls` crate in the `postgres` examples folder.
+
 ## Crate Feature Flags
 
 Diesel-async offers several configurable features:
