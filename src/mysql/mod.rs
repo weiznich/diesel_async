@@ -35,9 +35,7 @@ pub struct AsyncMysqlConnection {
 #[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncMysqlConnection {
     async fn batch_execute(&mut self, query: &str) -> diesel::QueryResult<()> {
-        self.instrumentation
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        self.instrumentation()
             .on_connection_event(InstrumentationEvent::start_query(&StrQueryHelper::new(
                 query,
             )));
@@ -47,9 +45,7 @@ impl SimpleAsyncConnection for AsyncMysqlConnection {
             .await
             .map_err(ErrorHelper)
             .map_err(Into::into);
-        self.instrumentation
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        self.instrumentation()
             .on_connection_event(InstrumentationEvent::finish_query(
                 &StrQueryHelper::new(query),
                 result.as_ref().err(),
@@ -232,7 +228,9 @@ impl AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
-            instrumentation: std::sync::Mutex::new(None),
+            instrumentation: std::sync::Mutex::new(
+                diesel::connection::get_default_instrumentation(),
+            ),
         };
 
         for stmt in CONNECTION_SETUP_QUERIES {
@@ -257,9 +255,7 @@ impl AsyncMysqlConnection {
         T: QueryFragment<Mysql> + QueryId,
         F: Future<Output = QueryResult<R>> + Send,
     {
-        self.instrumentation
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        self.instrumentation()
             .on_connection_event(InstrumentationEvent::start_query(&diesel::debug_query(
                 &query,
             )));
@@ -272,7 +268,7 @@ impl AsyncMysqlConnection {
             ref mut conn,
             ref mut stmt_cache,
             ref mut transaction_manager,
-            ref instrumentation,
+            ref mut instrumentation,
             ..
         } = self;
 
@@ -311,7 +307,7 @@ impl AsyncMysqlConnection {
             };
             let r = update_transaction_manager_status(inner.await, transaction_manager);
             instrumentation
-                .lock()
+                .get_mut()
                 .unwrap_or_else(|p| p.into_inner())
                 .on_connection_event(InstrumentationEvent::finish_query(
                     &StrQueryHelper::new(&sql),
