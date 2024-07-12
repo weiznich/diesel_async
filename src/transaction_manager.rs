@@ -1,3 +1,4 @@
+use diesel::connection::InstrumentationEvent;
 use diesel::connection::TransactionManagerStatus;
 use diesel::connection::{
     InTransactionStatus, TransactionDepthChange, ValidTransactionManagerStatus,
@@ -301,6 +302,12 @@ where
                 Cow::from(format!("SAVEPOINT diesel_savepoint_{transaction_depth}"))
             }
         };
+        let depth = transaction_state
+            .transaction_depth()
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(NonZeroU32::new(1).expect("It's not 0"));
+        conn.instrumentation()
+            .on_connection_event(InstrumentationEvent::begin_transaction(depth));
         conn.batch_execute(&start_transaction_sql).await?;
         Self::get_transaction_state(conn)?
             .change_transaction_depth(TransactionDepthChange::IncreaseDepth)?;
@@ -330,6 +337,12 @@ where
             ),
             None => return Err(Error::NotInTransaction),
         };
+
+        let depth = transaction_state
+            .transaction_depth()
+            .expect("We know that we are in a transaction here");
+        conn.instrumentation()
+            .on_connection_event(InstrumentationEvent::rollback_transaction(depth));
 
         match conn.batch_execute(&rollback_sql).await {
             Ok(()) => {
@@ -410,6 +423,12 @@ where
                 false,
             ),
         };
+        let depth = transaction_state
+            .transaction_depth()
+            .expect("We know that we are in a transaction here");
+        conn.instrumentation()
+            .on_connection_event(InstrumentationEvent::commit_transaction(depth));
+
         match conn.batch_execute(&commit_sql).await {
             Ok(()) => {
                 match Self::get_transaction_state(conn)?

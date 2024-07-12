@@ -9,6 +9,7 @@
 
 use crate::{AsyncConnection, SimpleAsyncConnection, TransactionManager};
 use diesel::backend::{Backend, DieselReserveSpecialization};
+use diesel::connection::Instrumentation;
 use diesel::connection::{
     Connection, LoadConnection, TransactionManagerStatus, WithMetadataLookup,
 };
@@ -148,6 +149,34 @@ where
         &mut self,
     ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData {
         self.exclusive_connection().transaction_state()
+    }
+
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner
+                .get_mut()
+                .unwrap_or_else(|p| p.into_inner())
+                .instrumentation()
+        } else {
+            panic!("Cannot access shared instrumentation")
+        }
+    }
+
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner
+                .get_mut()
+                .unwrap_or_else(|p| p.into_inner())
+                .set_instrumentation(instrumentation)
+        } else {
+            panic!("Cannot access shared instrumentation")
+        }
     }
 }
 

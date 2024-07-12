@@ -8,6 +8,7 @@
 use crate::{AsyncConnection, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
+use diesel::connection::Instrumentation;
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 use std::borrow::Cow;
@@ -230,6 +231,14 @@ where
 
     async fn begin_test_transaction(&mut self) -> diesel::QueryResult<()> {
         self.deref_mut().begin_test_transaction().await
+    }
+
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+        self.deref_mut().instrumentation()
+    }
+
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+        self.deref_mut().set_instrumentation(instrumentation);
     }
 }
 

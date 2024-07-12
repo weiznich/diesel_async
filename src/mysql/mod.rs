@@ -1,6 +1,9 @@
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{MaybeCached, StatementCacheKey};
+use diesel::connection::Instrumentation;
+use diesel::connection::InstrumentationEvent;
+use diesel::connection::StrQueryHelper;
 use diesel::mysql::{Mysql, MysqlQueryBuilder, MysqlType};
 use diesel::query_builder::QueryBuilder;
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
@@ -26,12 +29,28 @@ pub struct AsyncMysqlConnection {
     conn: mysql_async::Conn,
     stmt_cache: StmtCache<Mysql, Statement>,
     transaction_manager: AnsiTransactionManager,
+    instrumentation: std::sync::Mutex<Option<Box<dyn Instrumentation>>>,
 }
 
 #[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncMysqlConnection {
     async fn batch_execute(&mut self, query: &str) -> diesel::QueryResult<()> {
-        Ok(self.conn.query_drop(query).await.map_err(ErrorHelper)?)
+        self.instrumentation()
+            .on_connection_event(InstrumentationEvent::start_query(&StrQueryHelper::new(
+                query,
+            )));
+        let result = self
+            .conn
+            .query_drop(query)
+            .await
+            .map_err(ErrorHelper)
+            .map_err(Into::into);
+        self.instrumentation()
+            .on_connection_event(InstrumentationEvent::finish_query(
+                &StrQueryHelper::new(query),
+                result.as_ref().err(),
+            ));
+        result
     }
 }
 
@@ -53,20 +72,18 @@ impl AsyncConnection for AsyncMysqlConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> diesel::ConnectionResult<Self> {
-        let opts = Opts::from_url(database_url)
-            .map_err(|e| diesel::result::ConnectionError::InvalidConnectionUrl(e.to_string()))?;
-        let builder = OptsBuilder::from_opts(opts)
-            .init(CONNECTION_SETUP_QUERIES.to_vec())
-            .stmt_cache_size(0) // We have our own cache
-            .client_found_rows(true); // This allows a consistent behavior between MariaDB/MySQL and PostgreSQL (and is already set in `diesel`)
-
-        let conn = mysql_async::Conn::new(builder).await.map_err(ErrorHelper)?;
-
-        Ok(AsyncMysqlConnection {
-            conn,
-            stmt_cache: StmtCache::new(),
-            transaction_manager: AnsiTransactionManager::default(),
-        })
+        let mut instrumentation = diesel::connection::get_default_instrumentation();
+        instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
+            database_url,
+        ));
+        let r = Self::establish_connection_inner(database_url).await;
+        instrumentation.on_connection_event(InstrumentationEvent::finish_establish_connection(
+            database_url,
+            r.as_ref().err(),
+        ));
+        let mut conn = r?;
+        conn.instrumentation = std::sync::Mutex::new(instrumentation);
+        Ok(conn)
     }
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
@@ -80,7 +97,10 @@ impl AsyncConnection for AsyncMysqlConnection {
             let stmt_for_exec = match stmt {
                 MaybeCached::Cached(ref s) => (*s).clone(),
                 MaybeCached::CannotCache(ref s) => s.clone(),
-                _ => todo!(),
+                _ => unreachable!(
+                    "Diesel has only two variants here at the time of writing.\n\
+                     If you ever see this error message please open in issue in the diesel-async issue tracker"
+                ),
             };
 
             let (tx, rx) = futures_channel::mpsc::channel(0);
@@ -152,6 +172,19 @@ impl AsyncConnection for AsyncMysqlConnection {
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
         &mut self.transaction_manager
     }
+
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+        self.instrumentation
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+        *self
+            .instrumentation
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner()) = Some(Box::new(instrumentation));
+    }
 }
 
 #[inline(always)]
@@ -195,6 +228,9 @@ impl AsyncMysqlConnection {
             conn,
             stmt_cache: StmtCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
+            instrumentation: std::sync::Mutex::new(
+                diesel::connection::get_default_instrumentation(),
+            ),
         };
 
         for stmt in CONNECTION_SETUP_QUERIES {
@@ -219,6 +255,10 @@ impl AsyncMysqlConnection {
         T: QueryFragment<Mysql> + QueryId,
         F: Future<Output = QueryResult<R>> + Send,
     {
+        self.instrumentation()
+            .on_connection_event(InstrumentationEvent::start_query(&diesel::debug_query(
+                &query,
+            )));
         let mut bind_collector = RawBytesBindCollector::<Mysql>::new();
         let bind_collector = query
             .collect_binds(&mut bind_collector, &mut (), &Mysql)
@@ -228,6 +268,7 @@ impl AsyncMysqlConnection {
             ref mut conn,
             ref mut stmt_cache,
             ref mut transaction_manager,
+            ref mut instrumentation,
             ..
         } = self;
 
@@ -242,28 +283,37 @@ impl AsyncMysqlConnection {
             } = bind_collector?;
             let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
             let sql = sql?;
-            let cache_key = if let Some(query_id) = query_id {
-                StatementCacheKey::Type(query_id)
-            } else {
-                StatementCacheKey::Sql {
-                    sql: sql.clone(),
-                    bind_types: metadata.clone(),
-                }
-            };
+            let inner = async {
+                let cache_key = if let Some(query_id) = query_id {
+                    StatementCacheKey::Type(query_id)
+                } else {
+                    StatementCacheKey::Sql {
+                        sql: sql.clone(),
+                        bind_types: metadata.clone(),
+                    }
+                };
 
-            let (stmt, conn) = stmt_cache
-                .cached_prepared_statement(
-                    cache_key,
-                    sql,
-                    is_safe_to_cache_prepared,
-                    &metadata,
-                    conn,
-                )
-                .await?;
-            update_transaction_manager_status(
-                callback(conn, stmt, ToSqlHelper { metadata, binds }).await,
-                transaction_manager,
-            )
+                let (stmt, conn) = stmt_cache
+                    .cached_prepared_statement(
+                        cache_key,
+                        sql.clone(),
+                        is_safe_to_cache_prepared,
+                        &metadata,
+                        conn,
+                        instrumentation,
+                    )
+                    .await?;
+                callback(conn, stmt, ToSqlHelper { metadata, binds }).await
+            };
+            let r = update_transaction_manager_status(inner.await, transaction_manager);
+            instrumentation
+                .get_mut()
+                .unwrap_or_else(|p| p.into_inner())
+                .on_connection_event(InstrumentationEvent::finish_query(
+                    &StrQueryHelper::new(&sql),
+                    r.as_ref().err(),
+                ));
+            r
         }
         .boxed()
     }
@@ -299,6 +349,26 @@ impl AsyncMysqlConnection {
         }
 
         Ok(())
+    }
+
+    async fn establish_connection_inner(
+        database_url: &str,
+    ) -> Result<AsyncMysqlConnection, ConnectionError> {
+        let opts = Opts::from_url(database_url)
+            .map_err(|e| diesel::result::ConnectionError::InvalidConnectionUrl(e.to_string()))?;
+        let builder = OptsBuilder::from_opts(opts)
+            .init(CONNECTION_SETUP_QUERIES.to_vec())
+            .stmt_cache_size(0) // We have our own cache
+            .client_found_rows(true); // This allows a consistent behavior between MariaDB/MySQL and PostgreSQL (and is already set in `diesel`)
+
+        let conn = mysql_async::Conn::new(builder).await.map_err(ErrorHelper)?;
+
+        Ok(AsyncMysqlConnection {
+            conn,
+            stmt_cache: StmtCache::new(),
+            transaction_manager: AnsiTransactionManager::default(),
+            instrumentation: std::sync::Mutex::new(None),
+        })
     }
 }
 

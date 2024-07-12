@@ -7,6 +7,7 @@ use std::pin::Pin;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
+mod instrumentation;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
 #[cfg(feature = "async-connection-wrapper")]
@@ -123,19 +124,6 @@ async fn test_basic_insert_and_load() -> QueryResult<()> {
     Ok(())
 }
 
-#[cfg(feature = "mysql")]
-async fn setup(connection: &mut TestConnection) {
-    diesel::sql_query(
-        "CREATE TEMPORARY TABLE users (
-                id INTEGER PRIMARY KEY AUTO_INCREMENT,
-                name TEXT NOT NULL
-            ) CHARACTER SET utf8mb4",
-    )
-    .execute(connection)
-    .await
-    .unwrap();
-}
-
 #[cfg(feature = "postgres")]
 diesel::define_sql_function!(fn pg_sleep(interval: diesel::sql_types::Double));
 
@@ -195,6 +183,19 @@ async fn setup(connection: &mut TestConnection) {
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL
             )",
+    )
+    .execute(connection)
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "mysql")]
+async fn setup(connection: &mut TestConnection) {
+    diesel::sql_query(
+        "CREATE TEMPORARY TABLE users (
+                id INTEGER PRIMARY KEY AUTO_INCREMENT,
+                name TEXT NOT NULL
+            ) CHARACTER SET utf8mb4",
     )
     .execute(connection)
     .await
