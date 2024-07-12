@@ -147,6 +147,11 @@ impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
+        let mut instrumentation = diesel::connection::get_default_instrumentation();
+        instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
+            database_url,
+        ));
+        let instrumentation = Arc::new(std::sync::Mutex::new(instrumentation));
         let (client, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls)
             .await
             .map_err(ErrorHelper)?;
@@ -161,7 +166,21 @@ impl AsyncConnection for AsyncPgConnection {
             }
         });
 
-        Self::setup(client, Some(rx), Some(shutdown_tx)).await
+        let r = Self::setup(
+            client,
+            Some(rx),
+            Some(shutdown_tx),
+            Arc::clone(&instrumentation),
+        )
+        .await;
+        instrumentation
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_connection_event(InstrumentationEvent::finish_establish_connection(
+                database_url,
+                r.as_ref().err(),
+            ));
+        r
     }
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
@@ -336,13 +355,22 @@ impl AsyncPgConnection {
 
     /// Construct a new `AsyncPgConnection` instance from an existing [`tokio_postgres::Client`]
     pub async fn try_from(conn: tokio_postgres::Client) -> ConnectionResult<Self> {
-        Self::setup(conn, None, None).await
+        Self::setup(
+            conn,
+            None,
+            None,
+            Arc::new(std::sync::Mutex::new(
+                diesel::connection::get_default_instrumentation(),
+            )),
+        )
+        .await
     }
 
     async fn setup(
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
+        instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
             conn: Arc::new(conn),
@@ -351,7 +379,7 @@ impl AsyncPgConnection {
             metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
             connection_future,
             shutdown_channel,
-            instrumentation: Arc::new(std::sync::Mutex::new(None)),
+            instrumentation,
         };
         conn.set_config_options()
             .await
