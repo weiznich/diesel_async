@@ -2,9 +2,8 @@ use diesel::prelude::*;
 use diesel::sqlite::{Sqlite, SqliteConnection};
 use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
-use diesel_async::{AsyncConnection, RunQueryDsl, SimpleAsyncConnection};
+use diesel_async::{AsyncConnection, RunQueryDsl};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use futures_util::FutureExt;
 
 // ordinary diesel model setup
 
@@ -59,21 +58,10 @@ async fn transaction(
                 if old_name.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    diesel::sql_query(
-                        r#"
-                    update
-                        users
-                    set
-                        name = ?2
-                    where
-                        name == ?1
-                    returning *
-                "#,
-                    )
-                    .bind::<diesel::sql_types::Text, _>(old_name)
-                    .bind::<diesel::sql_types::Text, _>(new_name)
-                    .load(c)
-                    .await
+                    diesel::update(users::table.filter(users::name.eq(old_name)))
+                        .set(users::name.eq(new_name))
+                        .load(c)
+                        .await
                 }
             })
         })
@@ -90,10 +78,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut sync_wrapper: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
 
-    sync_wrapper.batch_execute("DELETE FROM users").await?;
+    diesel::delete(users::table)
+        .execute(&mut sync_wrapper)
+        .await?;
 
-    sync_wrapper
-        .batch_execute("INSERT INTO users(id, name) VALUES (3, 'toto')")
+    diesel::insert_into(users::table)
+        .values((users::id.eq(3), users::name.eq("toto")))
+        .execute(&mut sync_wrapper)
         .await?;
 
     let data: Vec<User> = users::table
@@ -119,14 +110,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     println!("{data:?}");
 
-    // let changed = transaction(&mut sync_wrapper, "iLuke", "JustLuke").await?;
-    // println!("Changed {changed:?}");
-
-    // create an async connection for the migrations
+    // a quick test to check if we correctly handle transactions
     let mut conn_a: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
     let mut conn_b: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
 
-    tokio::spawn(async move {
+    let handle_1 = tokio::spawn(async move {
         loop {
             let changed = transaction(&mut conn_a, "iLuke", "JustLuke").await;
             println!("Changed {changed:?}");
@@ -134,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    tokio::spawn(async move {
+    let handle_2 = tokio::spawn(async move {
         loop {
             let changed = transaction(&mut conn_b, "JustLuke", "iLuke").await;
             println!("Changed {changed:?}");
@@ -142,9 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    let _ = handle_2.await;
+    let _ = handle_1.await;
 
     Ok(())
 }
