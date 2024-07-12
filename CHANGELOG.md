@@ -11,6 +11,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 * The minimal supported rust version is now 1.78.0
 * Add a `SyncConnectionWrapper` type that turns a sync connection into an async one. This enables SQLite support for diesel-async
 * Add support for `diesel::connection::Instrumentation` to support logging and other instrumentation for any of the provided connection impls.
+* Bump minimal supported mysql_async version to 0.34
 
 ## [0.4.1] - 2023-09-01
 
