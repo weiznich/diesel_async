@@ -129,10 +129,17 @@ where
             let mut cache = <<<C as LoadConnection>::Row<'_, '_> as IntoOwnedRow<
                 <C as Connection>::Backend,
             >>::Cache as Default>::default();
-            conn.load(&query).map(|c| {
-                c.map(|row| row.map(|r| IntoOwnedRow::into_owned(r, &mut cache)))
-                    .collect::<Vec<QueryResult<O>>>()
-            })
+            let cursor = conn.load(&query)?;
+
+            let size_hint = cursor.size_hint();
+            let mut out = Vec::with_capacity(size_hint.1.unwrap_or(size_hint.0));
+            // we use an explicit loop here to easily propagate possible errors
+            // as early as possible
+            for row in cursor {
+                out.push(Ok(IntoOwnedRow::into_owned(row?, &mut cache)));
+            }
+
+            Ok(out)
         })
         .map_ok(|rows| futures_util::stream::iter(rows).boxed())
         .boxed()
