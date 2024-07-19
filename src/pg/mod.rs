@@ -22,7 +22,7 @@ use futures_util::future::Either;
 use futures_util::stream::{BoxStream, TryStreamExt};
 use futures_util::TryFutureExt;
 use futures_util::{Future, FutureExt, StreamExt};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -37,6 +37,8 @@ mod error_helper;
 mod row;
 mod serialize;
 mod transaction_builder;
+
+const FAKE_OID: u32 = 0;
 
 /// A connection to a PostgreSQL database.
 ///
@@ -257,7 +259,7 @@ fn type_from_oid(t: &PgTypeMetadata) -> QueryResult<Type> {
     }
 
     Ok(Type::new(
-        "diesel_custom_type".into(),
+        format!("diesel_custom_type_{oid}"),
         oid,
         tokio_postgres::types::Kind::Simple,
         "public".into(),
@@ -357,43 +359,134 @@ impl AsyncPgConnection {
             .to_sql(&mut query_builder, &Pg)
             .map(|_| query_builder.finish());
 
-        let mut bind_collector = RawBytesBindCollector::<diesel::pg::Pg>::new();
         let query_id = T::query_id();
 
-        // we don't resolve custom types here yet, we do that later
-        // in the async block below as we might need to perform lookup
-        // queries for that.
-        //
-        // We apply this workaround to prevent requiring all the diesel
-        // serialization code to beeing async
-        let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-        let collect_bind_result_0 = query.collect_binds(
-            &mut bind_collector_0,
-            &mut SameOidEveryTime { first_byte: 0 },
-            &Pg,
-        );
+        let (collect_bind_result, fake_oid_locations, generated_oids, mut bind_collector) = {
+            // we don't resolve custom types here yet, we do that later
+            // in the async block below as we might need to perform lookup
+            // queries for that.
+            //
+            // We apply this workaround to prevent requiring all the diesel
+            // serialization code to beeing async
+            //
+            // We give out constant fake oids here to optimize for the "happy" path
+            // without custom type lookup
+            let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+            let mut metadata_lookup_0 = PgAsyncMetadataLookup {
+                custom_oid: false,
+                generated_oids: None,
+                oid_generator: |_, _| (FAKE_OID, FAKE_OID),
+            };
+            let collect_bind_result_0 =
+                query.collect_binds(&mut bind_collector_0, &mut metadata_lookup_0, &Pg);
 
-        let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-        let collect_bind_result_1 = query.collect_binds(
-            &mut bind_collector_1,
-            &mut SameOidEveryTime { first_byte: 1 },
-            &Pg,
-        );
+            // we have encountered a custom type oid, so we need to perform more work here.
+            // These oids can occure in two locations:
+            //
+            // * In the collected metadata -> relativly easy to resolve, just need to replace them below
+            // * As part of the seralized bind blob -> hard to replace
+            //
+            // To address the second case, we perform a second run of the bind collector
+            // with a different set of fake oids. Then we compare the output of the two runs
+            // and use that information to infer where to replace bytes in the serialized output
 
-        let mut metadata_lookup = PgAsyncMetadataLookup::new(&bind_collector_0);
-        let collect_bind_result =
-            query.collect_binds(&mut bind_collector, &mut metadata_lookup, &Pg);
+            if metadata_lookup_0.custom_oid {
+                // we try to get the maxium oid we encountered here
+                // to be sure that we don't accidently give out a fake oid below that collides with
+                // something
+                let mut max_oid = bind_collector_0
+                    .metadata
+                    .iter()
+                    .flat_map(|t| {
+                        [
+                            t.oid().unwrap_or_default(),
+                            t.array_oid().unwrap_or_default(),
+                        ]
+                    })
+                    .max()
+                    .unwrap_or_default();
+                let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+                let mut metadata_lookup_1 = PgAsyncMetadataLookup {
+                    custom_oid: false,
+                    generated_oids: Some(HashMap::new()),
+                    oid_generator: move |_, _| {
+                        max_oid += 2;
+                        (max_oid, max_oid + 1)
+                    },
+                };
+                let collect_bind_result_2 =
+                    query.collect_binds(&mut bind_collector_1, &mut metadata_lookup_1, &Pg);
 
-        let fake_oid_locations = std::iter::zip(bind_collector_0.binds, bind_collector_1.binds)
-            .enumerate()
-            .flat_map(|(bind_index, (bytes_0, bytes_1))| {
-                std::iter::zip(bytes_0.unwrap_or_default(), bytes_1.unwrap_or_default())
+                assert_eq!(
+                    bind_collector_0.binds.len(),
+                    bind_collector_0.metadata.len()
+                );
+                let fake_oid_locations = std::iter::zip(
+                    bind_collector_0
+                        .binds
+                        .iter()
+                        .zip(&bind_collector_0.metadata),
+                    &bind_collector_1.binds,
+                )
+                .enumerate()
+                .flat_map(|(bind_index, ((bytes_0, metadata_0), bytes_1))| {
+                    // custom oids might appear in the serialized bind arguments for arrays or composite (record) types
+                    // in both cases the relevant buffer is a custom type on it's own
+                    // so we only need to check the cases that contain a fake OID on their own
+                    let (bytes_0, bytes_1) = if matches!(metadata_0.oid(), Ok(FAKE_OID)) {
+                        (
+                            bytes_0.as_deref().unwrap_or_default(),
+                            bytes_1.as_deref().unwrap_or_default(),
+                        )
+                    } else {
+                        // for all other cases, just return an empty
+                        // list to make the iteration below a no-op
+                        // and prevent the need of boxing
+                        (&[] as &[_], &[] as &[_])
+                    };
+                    let lookup_map = metadata_lookup_1
+                        .generated_oids
+                        .as_ref()
+                        .map(|map| {
+                            map.values()
+                                .flat_map(|(oid, array_oid)| [*oid, *array_oid])
+                                .collect::<HashSet<_>>()
+                        })
+                        .unwrap_or_default();
+                    std::iter::zip(
+                        bytes_0.windows(std::mem::size_of_val(&FAKE_OID)),
+                        bytes_1.windows(std::mem::size_of_val(&FAKE_OID)),
+                    )
                     .enumerate()
-                    .filter(|&(_, bytes)| bytes == (0, 1))
-                    .map(move |(byte_index, _)| (bind_index, byte_index))
-            })
-            // Avoid storing the bind collectors in the returned Future
-            .collect::<Vec<_>>();
+                    .filter_map(move |(byte_index, (l, r))| {
+                        // here we infer if some byte sequence is a fake oid
+                        // We use the following conditions for that:
+                        //
+                        // * The first byte sequence matches the constant FAKE_OID
+                        // * The second sequence does not match the constant FAKE_OID
+                        // * The second sequence is contained in the set of generated oid,
+                        //   otherwise we get false positives around the boundary
+                        //   of a to be replaced byte sequence
+                        let r_val =
+                            u32::from_be_bytes(r.try_into().expect("That's the right size"));
+                        (l == FAKE_OID.to_be_bytes()
+                            && r != FAKE_OID.to_be_bytes()
+                            && lookup_map.contains(&r_val))
+                        .then_some((bind_index, byte_index))
+                    })
+                })
+                // Avoid storing the bind collectors in the returned Future
+                .collect::<Vec<_>>();
+                (
+                    collect_bind_result_0.and(collect_bind_result_2),
+                    fake_oid_locations,
+                    metadata_lookup_1.generated_oids,
+                    bind_collector_1,
+                )
+            } else {
+                (collect_bind_result_0, Vec::new(), None, bind_collector_0)
+            }
+        };
 
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
@@ -403,59 +496,49 @@ impl AsyncPgConnection {
         async move {
             let sql = sql?;
             let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
-            collect_bind_result_0?;
-            collect_bind_result_1?;
             collect_bind_result?;
             // Check whether we need to resolve some types at all
             //
             // If the user doesn't use custom types there is no need
             // to borther with that at all
-            if !metadata_lookup.unresolved_types.is_empty() {
+            if let Some(ref unresolved_types) = generated_oids {
                 let metadata_cache = &mut *metadata_cache.lock().await;
-                let mut real_oids = HashMap::<u32, u32>::new();
+                let mut real_oids = HashMap::new();
 
-                for (index, (schema, lookup_type_name)) in metadata_lookup.unresolved_types.iter().enumerate() {
+                for ((schema, lookup_type_name), (fake_oid, fake_array_oid)) in
+                    unresolved_types
+                {
                     // for each unresolved item
                     // we check whether it's arleady in the cache
                     // or perform a lookup and insert it into the cache
                     let cache_key = PgMetadataCacheKey::new(
-                        schema.as_ref().map(Into::into),
+                        schema.as_deref().map(Into::into),
                         lookup_type_name.into(),
                     );
-                    let real_metadata = if let Some(type_metadata) = metadata_cache.lookup_type(&cache_key) {
+                    let real_metadata = if let Some(type_metadata) =
+                        metadata_cache.lookup_type(&cache_key)
+                    {
                         type_metadata
                     } else {
-                        let type_metadata = lookup_type(
-                            schema.clone(),
-                            lookup_type_name.clone(),
-                            &raw_connection,
-                        )
-                        .await?;
+                        let type_metadata =
+                            lookup_type(schema.clone(), lookup_type_name.clone(), &raw_connection)
+                                .await?;
                         metadata_cache.store_type(cache_key, type_metadata);
 
                         PgTypeMetadata::from_result(Ok(type_metadata))
                     };
-                    let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
-                    let [real_oid, real_array_oid] = unwrap_oids(&real_metadata);
-                    real_oids.extend([
-                        (fake_oid, real_oid),
-                        (fake_array_oid, real_array_oid),
-                    ]);
+                    // let (fake_oid, fake_array_oid) = metadata_lookup.fake_oids(index);
+                    let (real_oid, real_array_oid) = unwrap_oids(&real_metadata);
+                    real_oids.extend([(*fake_oid, real_oid), (*fake_array_oid, real_array_oid)]);
                 }
 
                 // Replace fake OIDs with real OIDs in `bind_collector.metadata`
                 for m in &mut bind_collector.metadata {
-                    let [oid, array_oid] = unwrap_oids(&m)
-                        .map(|oid| {
-                            real_oids
-                                .get(&oid)
-                                .copied()
-                                // If `oid` is not a key in `real_oids`, then `HasSqlType::metadata` returned it as a
-                                // hardcoded value instead of being lied to by `PgAsyncMetadataLookup`. In this case,
-                                // the existing value is already the real OID, so it's kept.
-                                .unwrap_or(oid)
-                        });
-                    *m = PgTypeMetadata::new(oid, array_oid);
+                    let (oid, array_oid) = unwrap_oids(m);
+                    *m = PgTypeMetadata::new(
+                        real_oids.get(&oid).copied().unwrap_or(oid),
+                        real_oids.get(&array_oid).copied().unwrap_or(array_oid)
+                    );
                 }
                 // Replace fake OIDs with real OIDs in `bind_collector.binds`
                 for (bind_index, byte_index) in fake_oid_locations {
@@ -503,53 +586,31 @@ impl AsyncPgConnection {
     }
 }
 
+type GeneratedOidTypeMap = Option<HashMap<(Option<String>, String), (u32, u32)>>;
+
 /// Collects types that need to be looked up, and causes fake OIDs to be written into the bind collector
 /// so they can be replaced with asynchronously fetched OIDs after the original query is dropped
-struct PgAsyncMetadataLookup {
-    unresolved_types: Vec<(Option<String>, String)>,
-    min_fake_oid: u32,
+struct PgAsyncMetadataLookup<F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static> {
+    custom_oid: bool,
+    generated_oids: GeneratedOidTypeMap,
+    oid_generator: F,
 }
 
-impl PgAsyncMetadataLookup {
-    fn new(bind_collector_0: &RawBytesBindCollector<Pg>) -> Self {
-        let max_hardcoded_oid = bind_collector_0
-            .metadata
-            .iter()
-            .flat_map(|m| [m.oid().unwrap_or(0), m.array_oid().unwrap_or(0)])
-            .max()
-            .unwrap_or(0);
-        Self {
-            unresolved_types: Vec::new(),
-            min_fake_oid: max_hardcoded_oid + 1,
-        }
-    }
-
-    fn fake_oids(&self, index: usize) -> (u32, u32) {
-        let oid = self.min_fake_oid + ((index as u32) * 2);
-        (oid, oid + 1)
-    }
-}
-
-impl PgMetadataLookup for PgAsyncMetadataLookup {
+impl<F> PgMetadataLookup for PgAsyncMetadataLookup<F>
+where
+    F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static,
+{
     fn lookup_type(&mut self, type_name: &str, schema: Option<&str>) -> PgTypeMetadata {
-        let index = self.unresolved_types.len();
-        self.unresolved_types
-            .push((schema.map(ToOwned::to_owned), type_name.to_owned()));
-        PgTypeMetadata::from_result(Ok(self.fake_oids(index)))
-    }
-}
+        self.custom_oid = true;
 
-/// Allows unambiguously determining:
-/// * where OIDs are written in `bind_collector.binds` after being returned by `lookup_type`
-/// * determining the maximum hardcoded OID in `bind_collector.metadata`
-struct SameOidEveryTime {
-    first_byte: u8,
-}
+        let oid = if let Some(map) = &mut self.generated_oids {
+            *map.entry((schema.map(ToOwned::to_owned), type_name.to_owned()))
+                .or_insert_with(|| (self.oid_generator)(type_name, schema))
+        } else {
+            (self.oid_generator)(type_name, schema)
+        };
 
-impl PgMetadataLookup for SameOidEveryTime {
-    fn lookup_type(&mut self, _type_name: &str, _schema: Option<&str>) -> PgTypeMetadata {
-        let oid = u32::from_be_bytes([self.first_byte, 0, 0, 0]);
-        PgTypeMetadata::new(oid, oid)
+        PgTypeMetadata::from_result(Ok(oid))
     }
 }
 
@@ -583,9 +644,12 @@ async fn lookup_type(
     Ok((r.get(0), r.get(1)))
 }
 
-fn unwrap_oids(metadata: &PgTypeMetadata) -> [u32; 2] {
-    [metadata.oid().ok(), metadata.array_oid().ok()]
-        .map(|oid| oid.expect("PgTypeMetadata is supposed to always be Ok here"))
+fn unwrap_oids(metadata: &PgTypeMetadata) -> (u32, u32) {
+    let err_msg = "PgTypeMetadata is supposed to always be Ok here";
+    (
+        metadata.oid().expect(err_msg),
+        metadata.array_oid().expect(err_msg),
+    )
 }
 
 fn replace_fake_oid(

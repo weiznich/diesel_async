@@ -85,9 +85,9 @@ async fn custom_types_round_trip() {
 
     // Try encoding arrays to test type metadata lookup
     let selected = select((
-        vec![MyEnum::Foo].into_sql::<(Array<MyType>)>(),
-        vec![0i32].into_sql::<(Array<Integer>)>(),
-        vec![MyEnum::Bar].into_sql::<(Array<MyType>)>(),
+        vec![MyEnum::Foo].into_sql::<Array<MyType>>(),
+        vec![0i32].into_sql::<Array<Integer>>(),
+        vec![MyEnum::Bar].into_sql::<Array<MyType>>(),
     ))
     .get_result::<(Vec<MyEnum>, Vec<i32>, Vec<MyEnum>)>(connection)
     .await
@@ -111,7 +111,7 @@ table! {
     }
 }
 
-#[derive(SqlType)]
+#[derive(SqlType, QueryId)]
 #[diesel(postgres_type(name = "my_type", schema = "custom_schema"))]
 pub struct MyTypeInCustomSchema;
 
@@ -175,6 +175,28 @@ async fn custom_types_in_custom_schema_round_trip() {
         )
         .await
         .unwrap();
+
+    // Try encoding arrays to test type metadata lookup
+    let selected = select((
+        vec![MyEnumInCustomSchema::Foo].into_sql::<Array<MyTypeInCustomSchema>>(),
+        vec![0i32].into_sql::<Array<Integer>>(),
+        vec![MyEnumInCustomSchema::Bar].into_sql::<Array<MyTypeInCustomSchema>>(),
+    ))
+    .get_result::<(
+        Vec<MyEnumInCustomSchema>,
+        Vec<i32>,
+        Vec<MyEnumInCustomSchema>,
+    )>(connection)
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            vec![MyEnumInCustomSchema::Foo],
+            vec![0],
+            vec![MyEnumInCustomSchema::Bar]
+        ),
+        selected
+    );
 
     let inserted = insert_into(custom_types_with_custom_schema::table)
         .values(&data)
