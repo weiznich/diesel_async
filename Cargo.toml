@@ -61,6 +61,9 @@ sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
 sync-connection-wrapper = ["tokio/rt"]
 async-connection-wrapper = ["tokio/net"]
 r2d2 = ["diesel/r2d2"]
+bb8 = ["dep:bb8"]
+mobc = ["dep:mobc"]
+deadpool = ["dep:deadpool"]
 
 [[test]]
 name = "integration_tests"

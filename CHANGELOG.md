@@ -6,6 +6,8 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.5.0] - 2024-07-19
+
 * Added type `diesel_async::pooled_connection::mobc::PooledConnection`
 * MySQL/MariaDB now use `CLIENT_FOUND_ROWS` capability to allow consistent behaviour with PostgreSQL regarding return value of UPDATe commands.
 * The minimal supported rust version is now 1.78.0
@@ -61,7 +63,6 @@ in the pool should be checked if they are still valid
 
 * Fix prepared statement leak for the mysql backend implementation
 
-
 ## 0.1.0 - 2022-09-27
 
 * Initial release
@@ -75,4 +76,5 @@ in the pool should be checked if they are still valid
 [0.3.2]: https://github.com/weiznich/diesel_async/compare/v0.3.1...v0.3.2
 [0.4.0]: https://github.com/weiznich/diesel_async/compare/v0.3.2...v0.4.0
 [0.4.1]: https://github.com/weiznich/diesel_async/compare/v0.4.0...v0.4.1
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.4.1...main
+[0.5.0]: https://github.com/weiznich/diesel_async/compare/v0.4.0...v0.5.0
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.5.0...main
