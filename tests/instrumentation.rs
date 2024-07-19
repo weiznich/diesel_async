@@ -89,7 +89,7 @@ async fn check_events_are_emitted_for_batch_execute() {
 #[tokio::test]
 async fn check_events_are_emitted_for_execute_returning_count() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    conn.execute_returning_count(&users::table.as_query())
+    conn.execute_returning_count(users::table.as_query())
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
@@ -162,10 +162,10 @@ async fn check_events_are_emitted_for_load_does_contain_error_for_failures() {
 #[tokio::test]
 async fn check_events_are_emitted_for_execute_returning_count_repeat_does_not_repeat_cache() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    conn.execute_returning_count(&users::table.as_query())
+    conn.execute_returning_count(users::table.as_query())
         .await
         .unwrap();
-    conn.execute_returning_count(&users::table.as_query())
+    conn.execute_returning_count(users::table.as_query())
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
