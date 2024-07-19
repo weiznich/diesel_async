@@ -213,7 +213,6 @@ cfg_if::cfg_if! {
                 accent VARCHAR(255) DEFAULT 'Blue'
             )").execute(connection).await.unwrap();
 
-            connection.begin_test_transaction().await.unwrap();
             diesel::sql_query("INSERT INTO users (name) VALUES ('Sean'), ('Tess')").execute(connection).await.unwrap();
             diesel::sql_query("INSERT INTO posts (user_id, title) VALUES
                 (1, 'My first post'),
@@ -231,12 +230,22 @@ cfg_if::cfg_if! {
 
         #[allow(dead_code)]
         async fn establish_connection() -> SyncConnectionWrapper<SqliteConnection> {
+            use diesel_async::AsyncConnection;
+
             let mut connection = connection_no_data().await;
+            connection.begin_test_transaction().await.unwrap();
             create_tables(&mut connection).await;
-
-
             connection
         }
+
+        async fn connection_no_transaction() -> SyncConnectionWrapper<SqliteConnection> {
+            use diesel_async::AsyncConnection;
+
+            let mut connection = SyncConnectionWrapper::<SqliteConnection>::establish(":memory:").await.unwrap();
+            create_tables(&mut connection).await;
+            connection
+        }
+
     } else {
         compile_error!(
             "At least one backend must be used to test this crate.\n \

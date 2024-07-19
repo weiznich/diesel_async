@@ -25,6 +25,9 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinError;
 
+#[cfg(feature = "sqlite")]
+mod sqlite;
+
 fn from_tokio_join_error(join_error: JoinError) -> diesel::result::Error {
     diesel::result::Error::DatabaseError(
         diesel::result::DatabaseErrorKind::UnableToSendCommand,
@@ -48,7 +51,7 @@ fn from_tokio_join_error(join_error: JoinError) -> diesel::result::Error {
 /// # Examples
 ///
 /// ```rust
-/// # include!("doctest_setup.rs");
+/// # include!("../doctest_setup.rs");
 /// use diesel_async::RunQueryDsl;
 /// use schema::users;
 ///
@@ -232,7 +235,33 @@ impl<C> SyncConnectionWrapper<C> {
         }
     }
 
-    pub(self) fn spawn_blocking<'a, R>(
+    /// Run a operation directly with the inner connection
+    ///
+    /// This function is usful to register custom functions
+    /// and collection for Sqlite for example
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # include!("../doctest_setup.rs");
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     let mut conn = establish_connection().await;
+    /// conn.spawn_blocking(|conn| {
+    ///    // sqlite.rs sqlite NOCASE only works for ASCII characters,
+    ///    // this collation allows handling UTF-8 (barring locale differences)
+    ///    conn.register_collation("RUSTNOCASE", |rhs, lhs| {
+    ///     rhs.to_lowercase().cmp(&lhs.to_lowercase())
+    ///   })
+    /// }).await
+    ///
+    /// # }
+    /// ```
+    pub fn spawn_blocking<'a, R>(
         &mut self,
         task: impl FnOnce(&mut C) -> QueryResult<R> + Send + 'static,
     ) -> BoxFuture<'a, QueryResult<R>>
