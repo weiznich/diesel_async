@@ -2,7 +2,7 @@ use diesel::prelude::*;
 use diesel::sqlite::{Sqlite, SqliteConnection};
 use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
-use diesel_async::{AsyncConnection, RunQueryDsl, SimpleAsyncConnection};
+use diesel_async::{AsyncConnection, RunQueryDsl};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
 // ordinary diesel model setup
@@ -15,7 +15,7 @@ table! {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Queryable, QueryableByName, Selectable)]
 #[diesel(table_name = users)]
 struct User {
     id: i32,
@@ -47,6 +47,27 @@ where
     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
 
+async fn transaction(
+    async_conn: &mut SyncConnectionWrapper<InnerConnection>,
+    old_name: &str,
+    new_name: &str,
+) -> Result<Vec<User>, diesel::result::Error> {
+    async_conn
+        .transaction::<Vec<User>, diesel::result::Error, _>(|c| {
+            Box::pin(async {
+                if old_name.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    diesel::update(users::table.filter(users::name.eq(old_name)))
+                        .set(users::name.eq(new_name))
+                        .load(c)
+                        .await
+                }
+            })
+        })
+        .await
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::var("DATABASE_URL").expect("Env var `DATABASE_URL` not set");
@@ -57,10 +78,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut sync_wrapper: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
 
-    sync_wrapper.batch_execute("DELETE FROM users").await?;
+    diesel::delete(users::table)
+        .execute(&mut sync_wrapper)
+        .await?;
 
-    sync_wrapper
-        .batch_execute("INSERT INTO users(id, name) VALUES (3, 'toto')")
+    diesel::insert_into(users::table)
+        .values((users::id.eq(3), users::name.eq("toto")))
+        .execute(&mut sync_wrapper)
         .await?;
 
     let data: Vec<User> = users::table
@@ -85,6 +109,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .load(&mut sync_wrapper)
         .await?;
     println!("{data:?}");
+
+    // a quick test to check if we correctly handle transactions
+    let mut conn_a: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
+    let mut conn_b: SyncConnectionWrapper<InnerConnection> = establish(&db_url).await?;
+
+    let handle_1 = tokio::spawn(async move {
+        loop {
+            let changed = transaction(&mut conn_a, "iLuke", "JustLuke").await;
+            println!("Changed {changed:?}");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+
+    let handle_2 = tokio::spawn(async move {
+        loop {
+            let changed = transaction(&mut conn_b, "JustLuke", "iLuke").await;
+            println!("Changed {changed:?}");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+
+    let _ = handle_2.await;
+    let _ = handle_1.await;
 
     Ok(())
 }

@@ -10,6 +10,9 @@ use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{PrepareCallback, StmtCache};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
+use diesel::connection::Instrumentation;
+use diesel::connection::InstrumentationEvent;
+use diesel::connection::StrQueryHelper;
 use diesel::pg::{
     Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder, PgTypeMetadata,
 };
@@ -110,18 +113,28 @@ pub struct AsyncPgConnection {
     metadata_cache: Arc<Mutex<PgMetadataCache>>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
+    // a sync mutex is fine here as we only hold it for a really short time
+    instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
 }
 
 #[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
+        self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
+            query,
+        )));
         let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
         let batch_execute = self
             .conn
             .batch_execute(query)
             .map_err(ErrorHelper)
             .map_err(Into::into);
-        drive_future(connection_future, batch_execute).await
+        let r = drive_future(connection_future, batch_execute).await;
+        self.record_instrumentation(InstrumentationEvent::finish_query(
+            &StrQueryHelper::new(query),
+            r.as_ref().err(),
+        ));
+        r
     }
 }
 
@@ -135,6 +148,11 @@ impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
+        let mut instrumentation = diesel::connection::get_default_instrumentation();
+        instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
+            database_url,
+        ));
+        let instrumentation = Arc::new(std::sync::Mutex::new(instrumentation));
         let (client, connection) = tokio_postgres::connect(database_url, tokio_postgres::NoTls)
             .await
             .map_err(ErrorHelper)?;
@@ -149,7 +167,21 @@ impl AsyncConnection for AsyncPgConnection {
             }
         });
 
-        Self::setup(client, Some(rx), Some(shutdown_tx)).await
+        let r = Self::setup(
+            client,
+            Some(rx),
+            Some(shutdown_tx),
+            Arc::clone(&instrumentation),
+        )
+        .await;
+        instrumentation
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_connection_event(InstrumentationEvent::finish_establish_connection(
+                database_url,
+                r.as_ref().err(),
+            ));
+        r
     }
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
@@ -157,18 +189,10 @@ impl AsyncConnection for AsyncPgConnection {
         T: AsQuery + 'query,
         T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
         let query = source.as_query();
-        let load_future = self.with_prepared_statement(query, |conn, stmt, binds| async move {
-            let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
+        let load_future = self.with_prepared_statement(query, load_prepared);
 
-            Ok(res
-                .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
-                .map_ok(PgRow::new)
-                .boxed())
-        });
-
-        drive_future(connection_future, load_future).boxed()
+        self.run_with_connection_future(load_future)
     }
 
     fn execute_returning_count<'conn, 'query, T>(
@@ -178,19 +202,8 @@ impl AsyncConnection for AsyncPgConnection {
     where
         T: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
-        let execute = self.with_prepared_statement(source, |conn, stmt, binds| async move {
-            let binds = binds
-                .iter()
-                .map(|b| b as &(dyn ToSql + Sync))
-                .collect::<Vec<_>>();
-
-            let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
-                .await
-                .map_err(ErrorHelper)?;
-            Ok(res as usize)
-        });
-        drive_future(connection_future, execute).boxed()
+        let execute = self.with_prepared_statement(source, execute_prepared);
+        self.run_with_connection_future(execute)
     }
 
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
@@ -203,6 +216,21 @@ impl AsyncConnection for AsyncPgConnection {
             panic!("Cannot access shared transaction state")
         }
     }
+
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(instrumentation) = Arc::get_mut(&mut self.instrumentation) {
+            instrumentation.get_mut().unwrap_or_else(|p| p.into_inner())
+        } else {
+            panic!("Cannot access shared instrumentation")
+        }
+    }
+
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
+        self.instrumentation = Arc::new(std::sync::Mutex::new(Some(Box::new(instrumentation))));
+    }
 }
 
 impl Drop for AsyncPgConnection {
@@ -211,6 +239,35 @@ impl Drop for AsyncPgConnection {
             let _ = tx.send(());
         }
     }
+}
+
+async fn load_prepared(
+    conn: Arc<tokio_postgres::Client>,
+    stmt: Statement,
+    binds: Vec<ToSqlHelper>,
+) -> QueryResult<BoxStream<'static, QueryResult<PgRow>>> {
+    let res = conn.query_raw(&stmt, binds).await.map_err(ErrorHelper)?;
+
+    Ok(res
+        .map_err(|e| diesel::result::Error::from(ErrorHelper(e)))
+        .map_ok(PgRow::new)
+        .boxed())
+}
+
+async fn execute_prepared(
+    conn: Arc<tokio_postgres::Client>,
+    stmt: Statement,
+    binds: Vec<ToSqlHelper>,
+) -> QueryResult<usize> {
+    let binds = binds
+        .iter()
+        .map(|b| b as &(dyn ToSql + Sync))
+        .collect::<Vec<_>>();
+
+    let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
+        .await
+        .map_err(ErrorHelper)?;
+    Ok(res as usize)
 }
 
 #[inline(always)]
@@ -299,13 +356,22 @@ impl AsyncPgConnection {
 
     /// Construct a new `AsyncPgConnection` instance from an existing [`tokio_postgres::Client`]
     pub async fn try_from(conn: tokio_postgres::Client) -> ConnectionResult<Self> {
-        Self::setup(conn, None, None).await
+        Self::setup(
+            conn,
+            None,
+            None,
+            Arc::new(std::sync::Mutex::new(
+                diesel::connection::get_default_instrumentation(),
+            )),
+        )
+        .await
     }
 
     async fn setup(
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
+        instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
             conn: Arc::new(conn),
@@ -314,6 +380,7 @@ impl AsyncPgConnection {
             metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
             connection_future,
             shutdown_channel,
+            instrumentation,
         };
         conn.set_config_options()
             .await
@@ -336,16 +403,27 @@ impl AsyncPgConnection {
         Ok(())
     }
 
+    fn run_with_connection_future<'a, R: 'a>(
+        &self,
+        future: impl Future<Output = QueryResult<R>> + Send + 'a,
+    ) -> BoxFuture<'a, QueryResult<R>> {
+        let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
+        drive_future(connection_future, future).boxed()
+    }
+
     fn with_prepared_statement<'a, T, F, R>(
         &mut self,
         query: T,
-        callback: impl FnOnce(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F + Send + 'a,
+        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId,
-        F: Future<Output = QueryResult<R>> + Send,
+        F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
+        self.record_instrumentation(InstrumentationEvent::start_query(&diesel::debug_query(
+            &query,
+        )));
         // we explicilty descruct the query here before going into the async block
         //
         // That's required to remove the send bound from `T` as we have translated
@@ -353,15 +431,9 @@ impl AsyncPgConnection {
         // which both are `Send`.
         // We also collect the query id (essentially an integer) and the safe_to_cache flag here
         // so there is no need to even access the query in the async block below
-        let is_safe_to_cache_prepared = query.is_safe_to_cache_prepared(&diesel::pg::Pg);
         let mut query_builder = PgQueryBuilder::default();
-        let sql = query
-            .to_sql(&mut query_builder, &Pg)
-            .map(|_| query_builder.finish());
 
-        let query_id = T::query_id();
-
-        let (collect_bind_result, fake_oid_locations, generated_oids, mut bind_collector) = {
+        let (collect_bind_result, fake_oid_locations, generated_oids, bind_collector) = {
             // we don't resolve custom types here yet, we do that later
             // in the async block below as we might need to perform lookup
             // queries for that.
@@ -488,13 +560,46 @@ impl AsyncPgConnection {
             }
         };
 
+        // The code that doesn't need the `T` generic parameter is in a separate function to reduce LLVM IR lines
+        self.with_prepared_statement_after_sql_built(
+            callback,
+            query.is_safe_to_cache_prepared(&Pg),
+            T::query_id(),
+            query.to_sql(&mut query_builder, &Pg),
+            collect_bind_result,
+            query_builder,
+            bind_collector,
+            fake_oid_locations,
+            generated_oids,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_prepared_statement_after_sql_built<'a, F, R>(
+        &mut self,
+        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
+        is_safe_to_cache_prepared: QueryResult<bool>,
+        query_id: Option<std::any::TypeId>,
+        to_sql_result: QueryResult<()>,
+        collect_bind_result: QueryResult<()>,
+        query_builder: PgQueryBuilder,
+        mut bind_collector: RawBytesBindCollector<Pg>,
+        fake_oid_locations: Vec<(usize, usize)>,
+        generated_oids: GeneratedOidTypeMap,
+    ) -> BoxFuture<'a, QueryResult<R>>
+    where
+        F: Future<Output = QueryResult<R>> + Send + 'a,
+        R: Send,
+    {
         let raw_connection = self.conn.clone();
         let stmt_cache = self.stmt_cache.clone();
         let metadata_cache = self.metadata_cache.clone();
         let tm = self.transaction_state.clone();
+        let instrumentation = self.instrumentation.clone();
 
         async move {
-            let sql = sql?;
+            let sql = to_sql_result.map(|_| query_builder.finish())?;
+            let res = async {
             let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
             collect_bind_result?;
             // Check whether we need to resolve some types at all
@@ -562,10 +667,11 @@ impl AsyncPgConnection {
                 stmt_cache
                     .cached_prepared_statement(
                         key,
-                        sql,
+                        sql.clone(),
                         is_safe_to_cache_prepared,
                         &bind_collector.metadata,
                         raw_connection.clone(),
+                        &instrumentation
                     )
                     .await?
                     .0
@@ -578,11 +684,29 @@ impl AsyncPgConnection {
                 .zip(bind_collector.binds)
                 .map(|(meta, bind)| ToSqlHelper(meta, bind))
                 .collect::<Vec<_>>();
-            let res = callback(raw_connection, stmt.clone(), binds).await;
+                callback(raw_connection, stmt.clone(), binds).await
+            };
+            let res = res.await;
             let mut tm = tm.lock().await;
-            update_transaction_manager_status(res, &mut tm)
+            let r = update_transaction_manager_status(res, &mut tm);
+            instrumentation
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .on_connection_event(InstrumentationEvent::finish_query(
+                    &StrQueryHelper::new(&sql),
+                    r.as_ref().err(),
+                ));
+
+            r
         }
         .boxed()
+    }
+
+    fn record_instrumentation(&self, event: InstrumentationEvent<'_>) {
+        self.instrumentation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .on_connection_event(event);
     }
 }
 

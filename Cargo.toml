@@ -27,17 +27,13 @@ futures-util = { version = "0.3.17", default-features = false, features = [
 ] }
 tokio-postgres = { version = "0.7.10", optional = true }
 tokio = { version = "1.26", optional = true }
-mysql_async = { version = ">=0.30.0,<0.34", optional = true, default-features = false, features = [
-        "minimal",
-        "derive",
+mysql_async = { version = "0.34", optional = true, default-features = false, features = [
+        "minimal-rust",
 ] }
-mysql_common = { version = ">=0.29.0,<0.32.0", optional = true, default-features = false, features = [
-        "frunk",
-        "derive",
-] }
+mysql_common = { version = "0.32", optional = true, default-features = false }
 
 bb8 = { version = "0.8", optional = true }
-deadpool = { version = "0.11", optional = true, default-features = false, features = [
+deadpool = { version = "0.12", optional = true, default-features = false, features = [
         "managed",
 ] }
 mobc = { version = ">=0.7,<0.10", optional = true }
@@ -49,9 +45,10 @@ cfg-if = "1"
 chrono = "0.4"
 diesel = { version = "2.2.0", default-features = false, features = ["chrono"] }
 diesel_migrations = "2.2.0"
+assert_matches = "1.0.1"
 
 [features]
-default = []
+default = ["sync-connection-wrapper"]
 mysql = [
         "diesel/mysql_backend",
         "mysql_async",
@@ -83,8 +80,8 @@ features = [
         "r2d2",
 ]
 no-default-features = true
-rustc-args = ["--cfg", "doc_cfg"]
-rustdoc-args = ["--cfg", "doc_cfg"]
+rustc-args = ["--cfg", "docsrs"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace]
 members = [
@@ -93,4 +90,3 @@ members = [
         "examples/postgres/run-pending-migrations-with-rustls",
         "examples/sync-wrapper",
 ]
-

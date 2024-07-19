@@ -1,4 +1,4 @@
-#![cfg_attr(doc_cfg, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 //! Diesel-async provides async variants of diesel related query functionality
 //!
 //! diesel-async is an extension to diesel itself. It is designed to be used together
@@ -69,6 +69,7 @@
 #![warn(missing_docs)]
 
 use diesel::backend::Backend;
+use diesel::connection::Instrumentation;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::result::Error;
 use diesel::row::Row;
@@ -347,4 +348,10 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
     #[doc(hidden)]
     fn _silence_lint_on_load_future(_: Self::LoadFuture<'_, '_>) {}
+
+    #[doc(hidden)]
+    fn instrumentation(&mut self) -> &mut dyn Instrumentation;
+
+    /// Set a specific [`Instrumentation`] implementation for this connection
+    fn set_instrumentation(&mut self, instrumentation: impl Instrumentation);
 }

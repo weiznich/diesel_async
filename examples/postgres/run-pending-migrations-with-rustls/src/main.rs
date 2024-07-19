@@ -29,7 +29,6 @@ fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConne
     let fut = async {
         // We first set up the way we want rustls to work.
         let rustls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
             .with_root_certificates(root_certs())
             .with_no_client_auth();
         let tls = tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config);
@@ -49,7 +48,6 @@ fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConne
 fn root_certs() -> rustls::RootCertStore {
     let mut roots = rustls::RootCertStore::empty();
     let certs = rustls_native_certs::load_native_certs().expect("Certs not loadable!");
-    let certs: Vec<_> = certs.into_iter().map(|cert| cert.0).collect();
-    roots.add_parsable_certificates(&certs);
+    roots.add_parsable_certificates(certs);
     roots
 }
