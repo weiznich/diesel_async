@@ -433,132 +433,7 @@ impl AsyncPgConnection {
         // so there is no need to even access the query in the async block below
         let mut query_builder = PgQueryBuilder::default();
 
-        let (collect_bind_result, fake_oid_locations, generated_oids, bind_collector) = {
-            // we don't resolve custom types here yet, we do that later
-            // in the async block below as we might need to perform lookup
-            // queries for that.
-            //
-            // We apply this workaround to prevent requiring all the diesel
-            // serialization code to beeing async
-            //
-            // We give out constant fake oids here to optimize for the "happy" path
-            // without custom type lookup
-            let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-            let mut metadata_lookup_0 = PgAsyncMetadataLookup {
-                custom_oid: false,
-                generated_oids: None,
-                oid_generator: |_, _| (FAKE_OID, FAKE_OID),
-            };
-            let collect_bind_result_0 =
-                query.collect_binds(&mut bind_collector_0, &mut metadata_lookup_0, &Pg);
-
-            // we have encountered a custom type oid, so we need to perform more work here.
-            // These oids can occure in two locations:
-            //
-            // * In the collected metadata -> relativly easy to resolve, just need to replace them below
-            // * As part of the seralized bind blob -> hard to replace
-            //
-            // To address the second case, we perform a second run of the bind collector
-            // with a different set of fake oids. Then we compare the output of the two runs
-            // and use that information to infer where to replace bytes in the serialized output
-
-            if metadata_lookup_0.custom_oid {
-                // we try to get the maxium oid we encountered here
-                // to be sure that we don't accidently give out a fake oid below that collides with
-                // something
-                let mut max_oid = bind_collector_0
-                    .metadata
-                    .iter()
-                    .flat_map(|t| {
-                        [
-                            t.oid().unwrap_or_default(),
-                            t.array_oid().unwrap_or_default(),
-                        ]
-                    })
-                    .max()
-                    .unwrap_or_default();
-                let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
-                let mut metadata_lookup_1 = PgAsyncMetadataLookup {
-                    custom_oid: false,
-                    generated_oids: Some(HashMap::new()),
-                    oid_generator: move |_, _| {
-                        max_oid += 2;
-                        (max_oid, max_oid + 1)
-                    },
-                };
-                let collect_bind_result_2 =
-                    query.collect_binds(&mut bind_collector_1, &mut metadata_lookup_1, &Pg);
-
-                assert_eq!(
-                    bind_collector_0.binds.len(),
-                    bind_collector_0.metadata.len()
-                );
-                let fake_oid_locations = std::iter::zip(
-                    bind_collector_0
-                        .binds
-                        .iter()
-                        .zip(&bind_collector_0.metadata),
-                    &bind_collector_1.binds,
-                )
-                .enumerate()
-                .flat_map(|(bind_index, ((bytes_0, metadata_0), bytes_1))| {
-                    // custom oids might appear in the serialized bind arguments for arrays or composite (record) types
-                    // in both cases the relevant buffer is a custom type on it's own
-                    // so we only need to check the cases that contain a fake OID on their own
-                    let (bytes_0, bytes_1) = if matches!(metadata_0.oid(), Ok(FAKE_OID)) {
-                        (
-                            bytes_0.as_deref().unwrap_or_default(),
-                            bytes_1.as_deref().unwrap_or_default(),
-                        )
-                    } else {
-                        // for all other cases, just return an empty
-                        // list to make the iteration below a no-op
-                        // and prevent the need of boxing
-                        (&[] as &[_], &[] as &[_])
-                    };
-                    let lookup_map = metadata_lookup_1
-                        .generated_oids
-                        .as_ref()
-                        .map(|map| {
-                            map.values()
-                                .flat_map(|(oid, array_oid)| [*oid, *array_oid])
-                                .collect::<HashSet<_>>()
-                        })
-                        .unwrap_or_default();
-                    std::iter::zip(
-                        bytes_0.windows(std::mem::size_of_val(&FAKE_OID)),
-                        bytes_1.windows(std::mem::size_of_val(&FAKE_OID)),
-                    )
-                    .enumerate()
-                    .filter_map(move |(byte_index, (l, r))| {
-                        // here we infer if some byte sequence is a fake oid
-                        // We use the following conditions for that:
-                        //
-                        // * The first byte sequence matches the constant FAKE_OID
-                        // * The second sequence does not match the constant FAKE_OID
-                        // * The second sequence is contained in the set of generated oid,
-                        //   otherwise we get false positives around the boundary
-                        //   of a to be replaced byte sequence
-                        let r_val =
-                            u32::from_be_bytes(r.try_into().expect("That's the right size"));
-                        (l == FAKE_OID.to_be_bytes()
-                            && r != FAKE_OID.to_be_bytes()
-                            && lookup_map.contains(&r_val))
-                        .then_some((bind_index, byte_index))
-                    })
-                })
-                // Avoid storing the bind collectors in the returned Future
-                .collect::<Vec<_>>();
-                (
-                    collect_bind_result_0.and(collect_bind_result_2),
-                    fake_oid_locations,
-                    metadata_lookup_1.generated_oids,
-                    bind_collector_1,
-                )
-            } else {
-                (collect_bind_result_0, Vec::new(), None, bind_collector_0)
-            }
-        };
+        let bind_data = construct_bind_data(&query);
 
         // The code that doesn't need the `T` generic parameter is in a separate function to reduce LLVM IR lines
         self.with_prepared_statement_after_sql_built(
@@ -566,26 +441,19 @@ impl AsyncPgConnection {
             query.is_safe_to_cache_prepared(&Pg),
             T::query_id(),
             query.to_sql(&mut query_builder, &Pg),
-            collect_bind_result,
             query_builder,
-            bind_collector,
-            fake_oid_locations,
-            generated_oids,
+            bind_data,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn with_prepared_statement_after_sql_built<'a, F, R>(
         &mut self,
         callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
         is_safe_to_cache_prepared: QueryResult<bool>,
         query_id: Option<std::any::TypeId>,
         to_sql_result: QueryResult<()>,
-        collect_bind_result: QueryResult<()>,
         query_builder: PgQueryBuilder,
-        mut bind_collector: RawBytesBindCollector<Pg>,
-        fake_oid_locations: Vec<(usize, usize)>,
-        generated_oids: GeneratedOidTypeMap,
+        bind_data: BindData,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         F: Future<Output = QueryResult<R>> + Send + 'a,
@@ -596,6 +464,12 @@ impl AsyncPgConnection {
         let metadata_cache = self.metadata_cache.clone();
         let tm = self.transaction_state.clone();
         let instrumentation = self.instrumentation.clone();
+        let BindData {
+            collect_bind_result,
+            fake_oid_locations,
+            generated_oids,
+            mut bind_collector,
+        } = bind_data;
 
         async move {
             let sql = to_sql_result.map(|_| query_builder.finish())?;
@@ -707,6 +581,142 @@ impl AsyncPgConnection {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .on_connection_event(event);
+    }
+}
+
+struct BindData {
+    collect_bind_result: Result<(), Error>,
+    fake_oid_locations: Vec<(usize, usize)>,
+    generated_oids: GeneratedOidTypeMap,
+    bind_collector: RawBytesBindCollector<Pg>,
+}
+
+fn construct_bind_data(query: &dyn QueryFragment<diesel::pg::Pg>) -> BindData {
+    // we don't resolve custom types here yet, we do that later
+    // in the async block below as we might need to perform lookup
+    // queries for that.
+    //
+    // We apply this workaround to prevent requiring all the diesel
+    // serialization code to beeing async
+    //
+    // We give out constant fake oids here to optimize for the "happy" path
+    // without custom type lookup
+    let mut bind_collector_0 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+    let mut metadata_lookup_0 = PgAsyncMetadataLookup {
+        custom_oid: false,
+        generated_oids: None,
+        oid_generator: |_, _| (FAKE_OID, FAKE_OID),
+    };
+    let collect_bind_result_0 =
+        query.collect_binds(&mut bind_collector_0, &mut metadata_lookup_0, &Pg);
+    // we have encountered a custom type oid, so we need to perform more work here.
+    // These oids can occure in two locations:
+    //
+    // * In the collected metadata -> relativly easy to resolve, just need to replace them below
+    // * As part of the seralized bind blob -> hard to replace
+    //
+    // To address the second case, we perform a second run of the bind collector
+    // with a different set of fake oids. Then we compare the output of the two runs
+    // and use that information to infer where to replace bytes in the serialized output
+    if metadata_lookup_0.custom_oid {
+        // we try to get the maxium oid we encountered here
+        // to be sure that we don't accidently give out a fake oid below that collides with
+        // something
+        let mut max_oid = bind_collector_0
+            .metadata
+            .iter()
+            .flat_map(|t| {
+                [
+                    t.oid().unwrap_or_default(),
+                    t.array_oid().unwrap_or_default(),
+                ]
+            })
+            .max()
+            .unwrap_or_default();
+        let mut bind_collector_1 = RawBytesBindCollector::<diesel::pg::Pg>::new();
+        let mut metadata_lookup_1 = PgAsyncMetadataLookup {
+            custom_oid: false,
+            generated_oids: Some(HashMap::new()),
+            oid_generator: move |_, _| {
+                max_oid += 2;
+                (max_oid, max_oid + 1)
+            },
+        };
+        let collect_bind_result_1 =
+            query.collect_binds(&mut bind_collector_1, &mut metadata_lookup_1, &Pg);
+
+        assert_eq!(
+            bind_collector_0.binds.len(),
+            bind_collector_0.metadata.len()
+        );
+        let fake_oid_locations = std::iter::zip(
+            bind_collector_0
+                .binds
+                .iter()
+                .zip(&bind_collector_0.metadata),
+            &bind_collector_1.binds,
+        )
+        .enumerate()
+        .flat_map(|(bind_index, ((bytes_0, metadata_0), bytes_1))| {
+            // custom oids might appear in the serialized bind arguments for arrays or composite (record) types
+            // in both cases the relevant buffer is a custom type on it's own
+            // so we only need to check the cases that contain a fake OID on their own
+            let (bytes_0, bytes_1) = if matches!(metadata_0.oid(), Ok(FAKE_OID)) {
+                (
+                    bytes_0.as_deref().unwrap_or_default(),
+                    bytes_1.as_deref().unwrap_or_default(),
+                )
+            } else {
+                // for all other cases, just return an empty
+                // list to make the iteration below a no-op
+                // and prevent the need of boxing
+                (&[] as &[_], &[] as &[_])
+            };
+            let lookup_map = metadata_lookup_1
+                .generated_oids
+                .as_ref()
+                .map(|map| {
+                    map.values()
+                        .flat_map(|(oid, array_oid)| [*oid, *array_oid])
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default();
+            std::iter::zip(
+                bytes_0.windows(std::mem::size_of_val(&FAKE_OID)),
+                bytes_1.windows(std::mem::size_of_val(&FAKE_OID)),
+            )
+            .enumerate()
+            .filter_map(move |(byte_index, (l, r))| {
+                // here we infer if some byte sequence is a fake oid
+                // We use the following conditions for that:
+                //
+                // * The first byte sequence matches the constant FAKE_OID
+                // * The second sequence does not match the constant FAKE_OID
+                // * The second sequence is contained in the set of generated oid,
+                //   otherwise we get false positives around the boundary
+                //   of a to be replaced byte sequence
+                let r_val = u32::from_be_bytes(r.try_into().expect("That's the right size"));
+                (l == FAKE_OID.to_be_bytes()
+                    && r != FAKE_OID.to_be_bytes()
+                    && lookup_map.contains(&r_val))
+                .then_some((bind_index, byte_index))
+            })
+        })
+        // Avoid storing the bind collectors in the returned Future
+        .collect::<Vec<_>>();
+        BindData {
+            collect_bind_result: collect_bind_result_0.and(collect_bind_result_1),
+            fake_oid_locations,
+            generated_oids: metadata_lookup_1.generated_oids,
+            bind_collector: bind_collector_1,
+        }
+    } else {
+        BindData {
+            collect_bind_result: collect_bind_result_0,
+            fake_oid_locations: Vec::new(),
+            generated_oids: None,
+            bind_collector: bind_collector_0,
+        }
     }
 }
 
