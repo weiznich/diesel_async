@@ -48,7 +48,7 @@ diesel_migrations = "2.2.0"
 assert_matches = "1.0.1"
 
 [features]
-default = ["sync-connection-wrapper"]
+default = []
 mysql = [
         "diesel/mysql_backend",
         "mysql_async",

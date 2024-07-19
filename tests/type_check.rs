@@ -169,7 +169,7 @@ async fn test_timestamp() {
     type_check::<_, sql_types::Timestamp>(
         conn,
         chrono::NaiveDateTime::new(
-            chrono::NaiveDate::from_ymd_opt(2021, 09, 27).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2021, 9, 27).unwrap(),
             chrono::NaiveTime::from_hms_milli_opt(17, 44, 23, 0).unwrap(),
         ),
     )
@@ -179,7 +179,7 @@ async fn test_timestamp() {
 #[tokio::test]
 async fn test_date() {
     let conn = &mut connection().await;
-    type_check::<_, sql_types::Date>(conn, chrono::NaiveDate::from_ymd_opt(2021, 09, 27).unwrap())
+    type_check::<_, sql_types::Date>(conn, chrono::NaiveDate::from_ymd_opt(2021, 9, 27).unwrap())
         .await;
 }
 
