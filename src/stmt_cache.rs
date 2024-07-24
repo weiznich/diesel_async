@@ -18,7 +18,8 @@ type PrepareFuture<'a, F, S> = future::Either<
     future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
 >;
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait PrepareCallback<S, M>: Sized {
     async fn prepare(
         self,

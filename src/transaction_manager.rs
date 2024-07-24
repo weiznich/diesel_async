@@ -16,7 +16,8 @@ use crate::AsyncConnection;
 ///
 /// You will not need to interact with this trait, unless you are writing an
 /// implementation of [`AsyncConnection`].
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// Data stored as part of the connection implementation
     /// to track the current transaction state of a connection
@@ -287,7 +288,8 @@ impl AnsiTransactionManager {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl<Conn> TransactionManager<Conn> for AnsiTransactionManager
 where
     Conn: AsyncConnection<TransactionManager = Self>,
