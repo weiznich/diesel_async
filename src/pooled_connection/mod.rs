@@ -293,6 +293,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 #[derive(diesel::query_builder::QueryId)]
 struct CheckConnectionQuery;
 
