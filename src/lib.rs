@@ -115,7 +115,8 @@ pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 /// Perform simple operations on a backend.
 ///
 /// You should likely use [`AsyncConnection`] instead.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait SimpleAsyncConnection {
     /// Execute multiple SQL statements within the same string.
     ///
@@ -129,7 +130,8 @@ pub trait SimpleAsyncConnection {
 /// This trait represents a n async database connection. It can be used to query the database through
 /// the query dsl provided by diesel, custom extensions or raw sql queries. It essentially mirrors
 /// the sync diesel [`Connection`](diesel::connection::Connection) implementation
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// The future returned by `AsyncConnection::execute`
     type ExecuteFuture<'conn, 'query>: Future<Output = QueryResult<usize>> + Send;

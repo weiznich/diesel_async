@@ -695,7 +695,8 @@ impl<T, Conn> RunQueryDsl<Conn> for T {}
 /// #     Ok(())
 /// # }
 /// ```
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait SaveChangesDsl<Conn> {
     /// See the trait documentation
     async fn save_changes<T>(self, connection: &mut Conn) -> QueryResult<T>
@@ -722,7 +723,8 @@ impl<T, Conn> SaveChangesDsl<Conn> for T where
 /// For implementing this trait for a custom backend:
 /// * The `Changes` generic parameter represents the changeset that should be stored
 /// * The `Output` generic parameter represents the type of the response.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnection
 where
     Changes: diesel::prelude::Identifiable + HasTable,
