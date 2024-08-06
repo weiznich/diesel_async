@@ -354,6 +354,14 @@ impl<C> SyncConnectionWrapper<C> {
     }
 }
 
+impl<C> Clone for SyncConnectionWrapper<C> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone()
+        }
+    }
+}
+
 #[cfg(any(
     feature = "deadpool",
     feature = "bb8",
