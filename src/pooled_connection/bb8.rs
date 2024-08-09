@@ -37,7 +37,10 @@
 //! # async fn run_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! #     use schema::users::dsl::*;
 //! #     let config = get_config();
-//! let pool = Pool::builder().build(config).await?;
+//! # #[cfg(feature = "postgres")]
+//! let pool: Pool<AsyncPgConnection> = Pool::builder().build(config).await?;
+//! # #[cfg(not(feature = "postgres"))]
+//! # let pool = Pool::builder().build(config).await?;
 //! let mut conn = pool.get().await?;
 //! # conn.begin_test_transaction();
 //! # create_tables(&mut conn).await;
@@ -53,6 +56,9 @@ use bb8::ManageConnection;
 use diesel::query_builder::QueryFragment;
 
 /// Type alias for using [`bb8::Pool`] with [`diesel-async`]
+///
+/// This is **not** equal to [`bb8::Pool`]. It already uses the correct
+/// connection manager and expects only the connection type as generic argument
 pub type Pool<C> = bb8::Pool<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`bb8::PooledConnection`] with [`diesel-async`]
 pub type PooledConnection<'a, C> = bb8::PooledConnection<'a, AsyncDieselConnectionManager<C>>;

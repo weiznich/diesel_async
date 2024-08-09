@@ -37,7 +37,10 @@
 //! # async fn run_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! #     use schema::users::dsl::*;
 //! #     let config = get_config();
-//! let pool = Pool::new(config);
+//! # #[cfg(feature = "postgres")]
+//! let pool: Pool<AsyncPgConnection> = Pool::new(config);
+//! # #[cfg(not(feature = "postgres"))]
+//! # let pool = Pool::new(config);
 //! let mut conn = pool.get().await?;
 //! # conn.begin_test_transaction();
 //! # create_tables(&mut conn).await;
@@ -51,6 +54,10 @@ use diesel::query_builder::QueryFragment;
 use mobc::Manager;
 
 /// Type alias for using [`mobc::Pool`] with [`diesel-async`]
+///
+///
+/// This is **not** equal to [`mobc::Pool`]. It already uses the correct
+/// connection manager and expects only the connection type as generic argument
 pub type Pool<C> = mobc::Pool<AsyncDieselConnectionManager<C>>;
 
 /// Type alias for using [`mobc::Connection`] with [`diesel-async`]

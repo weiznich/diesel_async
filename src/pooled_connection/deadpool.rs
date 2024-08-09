@@ -37,7 +37,10 @@
 //! # async fn run_test() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! #     use schema::users::dsl::*;
 //! #     let config = get_config();
-//! let pool = Pool::builder(config).build()?;
+//! # #[cfg(feature = "postgres")]
+//! let pool: Pool<AsyncPgConnection> = Pool::builder(config).build()?;
+//! # #[cfg(not(feature = "postgres"))]
+//! # let pool = Pool::builder(config).build()?;
 //! let mut conn = pool.get().await?;
 //! # conn.begin_test_transaction();
 //! # create_tables(&mut conn).await;
@@ -51,6 +54,9 @@ use deadpool::managed::Manager;
 use diesel::query_builder::QueryFragment;
 
 /// Type alias for using [`deadpool::managed::Pool`] with [`diesel-async`]
+///
+/// This is **not** equal to [`deadpool::managed::Pool`]. It already uses the correct
+/// connection manager and expects only the connection type as generic argument
 pub type Pool<C> = deadpool::managed::Pool<AsyncDieselConnectionManager<C>>;
 /// Type alias for using [`deadpool::managed::PoolBuilder`] with [`diesel-async`]
 pub type PoolBuilder<C> = deadpool::managed::PoolBuilder<AsyncDieselConnectionManager<C>>;
