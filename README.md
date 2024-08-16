@@ -1,4 +1,4 @@
-# A async interface for diesel
+# An async interface for diesel
 
 Diesel gets rid of the boilerplate for database interaction and eliminates
 runtime errors without sacrificing performance. It takes full advantage of
