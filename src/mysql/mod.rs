@@ -150,7 +150,8 @@ impl AsyncConnection for AsyncMysqlConnection {
             + 'query,
     {
         self.with_prepared_statement(source, |conn, stmt, binds| async move {
-            conn.exec_drop(&*stmt, binds).await.map_err(ErrorHelper)?;
+            let params = mysql_async::Params::try_from(binds)?;
+            conn.exec_drop(&*stmt, params).await.map_err(ErrorHelper)?;
             // We need to close any non-cached statement explicitly here as otherwise
             // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
             // for details
@@ -165,7 +166,9 @@ impl AsyncConnection for AsyncMysqlConnection {
             if let MaybeCached::CannotCache(stmt) = stmt {
                 conn.close(stmt).await.map_err(ErrorHelper)?;
             }
-            Ok(conn.affected_rows() as usize)
+            conn.affected_rows()
+                .try_into()
+                .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))
         })
     }
 
@@ -325,8 +328,10 @@ impl AsyncMysqlConnection {
         mut tx: futures_channel::mpsc::Sender<QueryResult<MysqlRow>>,
     ) -> QueryResult<()> {
         use futures_util::sink::SinkExt;
+        let params = mysql_async::Params::try_from(binds)?;
+
         let res = conn
-            .exec_iter(stmt_for_exec, binds)
+            .exec_iter(stmt_for_exec, params)
             .await
             .map_err(ErrorHelper)?;
 

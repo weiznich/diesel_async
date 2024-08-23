@@ -1,6 +1,7 @@
 use diesel::mysql::data_types::MysqlTime;
 use diesel::mysql::MysqlType;
 use diesel::mysql::MysqlValue;
+use diesel::QueryResult;
 use mysql_async::{Params, Value};
 use std::convert::TryInto;
 
@@ -9,10 +10,11 @@ pub(super) struct ToSqlHelper {
     pub(super) binds: Vec<Option<Vec<u8>>>,
 }
 
-fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> Value {
-    match bind {
+fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> QueryResult<Value> {
+    let cast_helper = |e| diesel::result::Error::SerializationError(Box::new(e));
+    let v = match bind {
         Some(bind) => match metadata {
-            MysqlType::Tiny => Value::Int((bind[0] as i8) as i64),
+            MysqlType::Tiny => Value::Int(i8::from_be_bytes([bind[0]]) as i64),
             MysqlType::Short => Value::Int(i16::from_ne_bytes(bind.try_into().unwrap()) as _),
             MysqlType::Long => Value::Int(i32::from_ne_bytes(bind.try_into().unwrap()) as _),
             MysqlType::LongLong => Value::Int(i64::from_ne_bytes(bind.try_into().unwrap())),
@@ -38,11 +40,11 @@ fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> Value {
                 .expect("This does not fail");
                 Value::Time(
                     time.neg,
-                    time.day as _,
-                    time.hour as _,
-                    time.minute as _,
-                    time.second as _,
-                    time.second_part as _,
+                    time.day,
+                    time.hour.try_into().map_err(cast_helper)?,
+                    time.minute.try_into().map_err(cast_helper)?,
+                    time.second.try_into().map_err(cast_helper)?,
+                    time.second_part.try_into().expect("Cast does not fail"),
                 )
             }
             MysqlType::Date | MysqlType::DateTime | MysqlType::Timestamp => {
@@ -52,13 +54,13 @@ fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> Value {
                 >::from_sql(MysqlValue::new(&bind, metadata))
                 .expect("This does not fail");
                 Value::Date(
-                    time.year as _,
-                    time.month as _,
-                    time.day as _,
-                    time.hour as _,
-                    time.minute as _,
-                    time.second as _,
-                    time.second_part as _,
+                    time.year.try_into().map_err(cast_helper)?,
+                    time.month.try_into().map_err(cast_helper)?,
+                    time.day.try_into().map_err(cast_helper)?,
+                    time.hour.try_into().map_err(cast_helper)?,
+                    time.minute.try_into().map_err(cast_helper)?,
+                    time.second.try_into().map_err(cast_helper)?,
+                    time.second_part.try_into().expect("Cast does not fail"),
                 )
             }
             MysqlType::Numeric
@@ -70,12 +72,19 @@ fn to_value((metadata, bind): (MysqlType, Option<Vec<u8>>)) -> Value {
             _ => unreachable!(),
         },
         None => Value::NULL,
-    }
+    };
+    Ok(v)
 }
 
-impl From<ToSqlHelper> for Params {
-    fn from(ToSqlHelper { metadata, binds }: ToSqlHelper) -> Self {
-        let values = metadata.into_iter().zip(binds).map(to_value).collect();
-        Params::Positional(values)
+impl TryFrom<ToSqlHelper> for Params {
+    type Error = diesel::result::Error;
+
+    fn try_from(ToSqlHelper { metadata, binds }: ToSqlHelper) -> Result<Self, Self::Error> {
+        let values = metadata
+            .into_iter()
+            .zip(binds)
+            .map(to_value)
+            .collect::<Result<Vec<_>, Self::Error>>()?;
+        Ok(Params::Positional(values))
     }
 }

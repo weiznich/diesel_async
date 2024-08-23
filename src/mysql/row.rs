@@ -99,7 +99,12 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
                 Some(Cow::Owned(buffer))
             }
             _t => {
-                let mut buffer = Vec::with_capacity(value.bin_len() as usize);
+                let mut buffer = Vec::with_capacity(
+                    value
+                        .bin_len()
+                        .try_into()
+                        .expect("Failed to cast byte size to usize"),
+                );
                 mysql_common::proto::MySerialize::serialize(value, &mut buffer);
                 Some(Cow::Owned(buffer))
             }

@@ -274,7 +274,8 @@ async fn execute_prepared(
     let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
         .await
         .map_err(ErrorHelper)?;
-    Ok(res as usize)
+    res.try_into()
+        .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))
 }
 
 #[inline(always)]

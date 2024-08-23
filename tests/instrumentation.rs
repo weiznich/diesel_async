@@ -116,7 +116,7 @@ async fn check_events_are_emitted_for_load() {
 async fn check_events_are_emitted_for_execute_returning_count_does_not_contain_cache_for_uncached_queries(
 ) {
     let (events_to_check, mut conn) = setup_test_case().await;
-    conn.execute_returning_count(&diesel::sql_query("select 1"))
+    conn.execute_returning_count(diesel::sql_query("select 1"))
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
@@ -141,7 +141,7 @@ async fn check_events_are_emitted_for_load_does_not_contain_cache_for_uncached_q
 async fn check_events_are_emitted_for_execute_returning_count_does_contain_error_for_failures() {
     let (events_to_check, mut conn) = setup_test_case().await;
     let _ = conn
-        .execute_returning_count(&diesel::sql_query("invalid"))
+        .execute_returning_count(diesel::sql_query("invalid"))
         .await;
     let events = events_to_check.lock().unwrap();
     assert_eq!(events.len(), 2, "{:?}", events);
