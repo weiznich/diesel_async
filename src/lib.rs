@@ -86,12 +86,7 @@ pub mod async_connection_wrapper;
 mod mysql;
 #[cfg(feature = "postgres")]
 pub mod pg;
-#[cfg(any(
-    feature = "deadpool",
-    feature = "bb8",
-    feature = "mobc",
-    feature = "r2d2"
-))]
+#[cfg(feature = "pool")]
 pub mod pooled_connection;
 mod run_query_dsl;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
