@@ -49,12 +49,8 @@ fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConne
         let (client, conn) = tokio_postgres::connect(config, tls)
             .await
             .map_err(|e| ConnectionError::BadConnection(e.to_string()))?;
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                eprintln!("Database connection: {e}");
-            }
-        });
-        AsyncPgConnection::try_from(client).await
+
+        AsyncPgConnection::try_from_client_and_connection(client, conn).await
     };
     fut.boxed()
 }
