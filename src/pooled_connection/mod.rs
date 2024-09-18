@@ -119,6 +119,7 @@ where
 /// * [deadpool](self::deadpool)
 /// * [bb8](self::bb8)
 /// * [mobc](self::mobc)
+#[allow(dead_code)]
 pub struct AsyncDieselConnectionManager<C> {
     connection_url: String,
     manager_config: ManagerConfig<C>,

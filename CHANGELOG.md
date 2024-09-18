@@ -6,6 +6,8 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+* Add crate feature `pool` for extending connection pool implements through external crate
+
 ## [0.5.0] - 2024-07-19
 
 * Added type `diesel_async::pooled_connection::mobc::PooledConnection`
