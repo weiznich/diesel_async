@@ -202,7 +202,7 @@ jobs:
         run: cargo +${{ matrix.rust }} version
 
       - name: Test diesel_async
-        run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc"
+        run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc async-connection-wrapper"
 
       - name: Run examples (Postgres)
         if: matrix.backend == 'postgres'
