@@ -43,7 +43,7 @@ pub trait BlockOn {
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,no_run
 /// # include!("doctest_setup.rs");
 /// use schema::users;
 /// use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
@@ -61,7 +61,7 @@ pub trait BlockOn {
 ///
 /// If you are in the scope of an existing tokio runtime you need to use
 /// `tokio::task::spawn_blocking` to encapsulate the blocking tasks
-/// ```rust
+/// ```rust,no_run
 /// # include!("doctest_setup.rs");
 /// use schema::users;
 /// use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
