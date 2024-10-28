@@ -101,6 +101,7 @@ pub use self::implementation::AsyncConnectionWrapper;
 
 mod implementation {
     use diesel::connection::{Instrumentation, SimpleConnection};
+    use std::ops::{Deref, DerefMut};
 
     use super::*;
 
@@ -119,6 +120,20 @@ mod implementation {
                 inner,
                 runtime: B::get_runtime(),
             }
+        }
+    }
+
+    impl<C, B> Deref for AsyncConnectionWrapper<C, B> {
+        type Target = C;
+
+        fn deref(&self) -> &Self::Target {
+            &self.inner
+        }
+    }
+
+    impl<C, B> DerefMut for AsyncConnectionWrapper<C, B> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.inner
         }
     }
 
