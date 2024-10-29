@@ -6,6 +6,17 @@ use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
 fn test_sync_wrapper() {
     use diesel::RunQueryDsl;
 
+    // The runtime is required for the `sqlite` implementation to be able to use
+    // `spawn_blocking()`. This is not required for `postgres` or `mysql`.
+    #[cfg(feature = "sqlite")]
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .unwrap();
+
+    #[cfg(feature = "sqlite")]
+    let _guard = rt.enter();
+
     let db_url = std::env::var("DATABASE_URL").unwrap();
     let mut conn = AsyncConnectionWrapper::<crate::TestConnection>::establish(&db_url).unwrap();
 
