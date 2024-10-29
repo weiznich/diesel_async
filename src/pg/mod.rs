@@ -894,7 +894,7 @@ impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
     use crate::run_query_dsl::RunQueryDsl;
     use diesel::sql_types::Integer;
