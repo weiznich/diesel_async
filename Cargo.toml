@@ -1,6 +1,6 @@
 [package]
 name = "diesel-async"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Georg Semmler <github@weiznich.de>"]
 edition = "2021"
 autotests = false
