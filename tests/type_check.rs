@@ -200,8 +200,8 @@ async fn test_datetime() {
     type_check::<_, sql_types::Datetime>(
         conn,
         chrono::NaiveDateTime::new(
-            chrono::NaiveDate::from_ymd_opt(2021, 09, 30).unwrap(),
-            chrono::NaiveTime::from_hms_milli_opt(12, 06, 42, 0).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2021, 9, 30).unwrap(),
+            chrono::NaiveTime::from_hms_milli_opt(12, 6, 42, 0).unwrap(),
         ),
     )
     .await;

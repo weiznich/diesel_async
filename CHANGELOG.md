@@ -6,7 +6,10 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.5.1] - 2024-11-01
+
 * Add crate feature `pool` for extending connection pool implements through external crate
+* Implement `Deref` and `DerefMut` for `AsyncConnectionWrapper` to allow using it in an async context as well
 
 ## [0.5.0] - 2024-07-19
 
@@ -79,4 +82,5 @@ in the pool should be checked if they are still valid
 [0.4.0]: https://github.com/weiznich/diesel_async/compare/v0.3.2...v0.4.0
 [0.4.1]: https://github.com/weiznich/diesel_async/compare/v0.4.0...v0.4.1
 [0.5.0]: https://github.com/weiznich/diesel_async/compare/v0.4.0...v0.5.0
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.5.0...main
+[0.5.1]: https://github.com/weiznich/diesel_async/compare/v0.5.0...v0.5.1
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.5.1...main

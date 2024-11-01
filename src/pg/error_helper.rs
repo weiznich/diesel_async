@@ -81,9 +81,9 @@ impl diesel::result::DatabaseErrorInformation for PostgresDbErrorWrapper {
 
     fn statement_position(&self) -> Option<i32> {
         use tokio_postgres::error::ErrorPosition;
-        self.0.position().map(|e| match e {
+        self.0.position().and_then(|e| match *e {
             ErrorPosition::Original(position) | ErrorPosition::Internal { position, .. } => {
-                *position as i32
+                position.try_into().ok()
             }
         })
     }

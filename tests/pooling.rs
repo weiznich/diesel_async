@@ -17,7 +17,7 @@ async fn save_changes_bb8() {
 
     let mut conn = pool.get().await.unwrap();
 
-    super::setup(&mut *conn).await;
+    super::setup(&mut conn).await;
 
     diesel::insert_into(users::table)
         .values(users::name.eq("John"))
@@ -51,7 +51,7 @@ async fn save_changes_deadpool() {
 
     let mut conn = pool.get().await.unwrap();
 
-    super::setup(&mut *conn).await;
+    super::setup(&mut conn).await;
 
     diesel::insert_into(users::table)
         .values(users::name.eq("John"))
@@ -85,7 +85,7 @@ async fn save_changes_mobc() {
 
     let mut conn = pool.get().await.unwrap();
 
-    super::setup(&mut *conn).await;
+    super::setup(&mut conn).await;
 
     diesel::insert_into(users::table)
         .values(users::name.eq("John"))
