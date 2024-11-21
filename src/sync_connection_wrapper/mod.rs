@@ -73,6 +73,7 @@ fn from_tokio_join_error(join_error: JoinError) -> diesel::result::Error {
 /// #    some_async_fn().await;
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct SyncConnectionWrapper<C> {
     inner: Arc<Mutex<C>>,
 }
