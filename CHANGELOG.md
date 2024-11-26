@@ -6,6 +6,10 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.5.2] - 2024-11-26
+
+* Fixed an issue around transaction cancellation that could lead to connection pools containing connections with dangling transactions
+
 ## [0.5.1] - 2024-11-01
 
 * Add crate feature `pool` for extending connection pool implements through external crate
