@@ -182,7 +182,11 @@ impl AnsiTransactionManager {
     where
         F: std::future::Future,
     {
-        is_broken.store(true, Ordering::Relaxed);
+        let was_broken = is_broken.swap(true, Ordering::Relaxed);
+        debug_assert!(
+            !was_broken,
+            "Tried to execute a transaction SQL on transaction manager that was previously cancled"
+        );
         let res = f.await;
         is_broken.store(false, Ordering::Relaxed);
         res
