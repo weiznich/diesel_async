@@ -65,7 +65,6 @@ pub type PooledConnection<'a, C> = bb8::PooledConnection<'a, AsyncDieselConnecti
 /// Type alias for using [`bb8::RunError`] with [`diesel-async`]
 pub type RunError = bb8::RunError<super::PoolError>;
 
-#[async_trait::async_trait]
 impl<C> ManageConnection for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
