@@ -7,12 +7,14 @@
 use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
-use crate::stmt_cache::{PrepareCallback, StmtCache};
+use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
-use diesel::connection::statement_cache::{PrepareForCache, StatementCacheKey};
-use diesel::connection::Instrumentation;
-use diesel::connection::InstrumentationEvent;
+use diesel::connection::statement_cache::{
+    PrepareForCache, QueryFragmentForCachedStatement, StatementCache,
+};
 use diesel::connection::StrQueryHelper;
+use diesel::connection::{CacheSize, Instrumentation};
+use diesel::connection::{DynInstrumentation, InstrumentationEvent};
 use diesel::pg::{
     Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder, PgTypeMetadata,
 };
@@ -122,13 +124,13 @@ const FAKE_OID: u32 = 0;
 /// [tokio_postgres_rustls]: https://docs.rs/tokio-postgres-rustls/0.12.0/tokio_postgres_rustls/
 pub struct AsyncPgConnection {
     conn: Arc<tokio_postgres::Client>,
-    stmt_cache: Arc<Mutex<StmtCache<diesel::pg::Pg, Statement>>>,
+    stmt_cache: Arc<Mutex<StatementCache<diesel::pg::Pg, Statement>>>,
     transaction_state: Arc<Mutex<AnsiTransactionManager>>,
     metadata_cache: Arc<Mutex<PgMetadataCache>>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
     // a sync mutex is fine here as we only hold it for a really short time
-    instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
+    instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
 }
 
 #[async_trait::async_trait]
@@ -162,7 +164,7 @@ impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
-        let mut instrumentation = diesel::connection::get_default_instrumentation();
+        let mut instrumentation = DynInstrumentation::default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
             database_url,
         ));
@@ -229,14 +231,25 @@ impl AsyncConnection for AsyncPgConnection {
         // that means there is only one instance of this arc and
         // we can simply access the inner data
         if let Some(instrumentation) = Arc::get_mut(&mut self.instrumentation) {
-            instrumentation.get_mut().unwrap_or_else(|p| p.into_inner())
+            &mut **(instrumentation.get_mut().unwrap_or_else(|p| p.into_inner()))
         } else {
             panic!("Cannot access shared instrumentation")
         }
     }
 
     fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
-        self.instrumentation = Arc::new(std::sync::Mutex::new(Some(Box::new(instrumentation))));
+        self.instrumentation = Arc::new(std::sync::Mutex::new(instrumentation.into()));
+    }
+
+    fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
+        // there should be no other pending future when this is called
+        // that means there is only one instance of this arc and
+        // we can simply access the inner data
+        if let Some(cache) = Arc::get_mut(&mut self.stmt_cache) {
+            cache.get_mut().set_cache_size(size)
+        } else {
+            panic!("Cannot access shared statement cache")
+        }
     }
 }
 
@@ -293,25 +306,33 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-#[async_trait::async_trait]
-impl PrepareCallback<Statement, PgTypeMetadata> for Arc<tokio_postgres::Client> {
-    async fn prepare(
-        self,
-        sql: &str,
-        metadata: &[PgTypeMetadata],
-        _is_for_cache: PrepareForCache,
-    ) -> QueryResult<(Statement, Self)> {
-        let bind_types = metadata
-            .iter()
-            .map(type_from_oid)
-            .collect::<QueryResult<Vec<_>>>()?;
-
-        let stmt = self
-            .prepare_typed(sql, &bind_types)
+fn prepare_statement_helper<'a>(
+    conn: Arc<tokio_postgres::Client>,
+    sql: &'a str,
+    _is_for_cache: PrepareForCache,
+    metadata: &[PgTypeMetadata],
+) -> CallbackHelper<
+    impl Future<Output = QueryResult<(Statement, Arc<tokio_postgres::Client>)>> + Send,
+> {
+    let bind_types = metadata
+        .iter()
+        .map(type_from_oid)
+        .collect::<QueryResult<Vec<_>>>();
+    // ideally we wouldn't clone the SQL string here
+    // but as we usually cache statements anyway
+    // this is a fixed one time const
+    //
+    // The probleme with not cloning it is that we then cannot express
+    // the right result lifetime anymore (at least not easily)
+    let sql = sql.to_string();
+    CallbackHelper(async move {
+        let bind_types = bind_types?;
+        let stmt = conn
+            .prepare_typed(&sql, &bind_types)
             .await
             .map_err(ErrorHelper);
-        Ok((stmt?, self))
-    }
+        Ok((stmt?, conn))
+    })
 }
 
 fn type_from_oid(t: &PgTypeMetadata) -> QueryResult<Type> {
@@ -369,7 +390,7 @@ impl AsyncPgConnection {
             None,
             None,
             Arc::new(std::sync::Mutex::new(
-                diesel::connection::get_default_instrumentation(),
+                DynInstrumentation::default_instrumentation(),
             )),
         )
         .await
@@ -390,9 +411,7 @@ impl AsyncPgConnection {
             client,
             Some(error_rx),
             Some(shutdown_tx),
-            Arc::new(std::sync::Mutex::new(
-                diesel::connection::get_default_instrumentation(),
-            )),
+            Arc::new(std::sync::Mutex::new(DynInstrumentation::none())),
         )
         .await
     }
@@ -401,11 +420,11 @@ impl AsyncPgConnection {
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
-        instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
+        instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
             conn: Arc::new(conn),
-            stmt_cache: Arc::new(Mutex::new(StmtCache::new())),
+            stmt_cache: Arc::new(Mutex::new(StatementCache::new())),
             transaction_state: Arc::new(Mutex::new(AnsiTransactionManager::default())),
             metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
             connection_future,
@@ -559,23 +578,27 @@ impl AsyncPgConnection {
                         })?;
                 }
             }
-            let key = match query_id {
-                Some(id) => StatementCacheKey::Type(id),
-                None => StatementCacheKey::Sql {
-                    sql: sql.clone(),
-                    bind_types: bind_collector.metadata.clone(),
-                },
-            };
             let stmt = {
                 let mut stmt_cache = stmt_cache.lock().await;
+                let helper = QueryFragmentHelper {
+                    sql: sql.clone(),
+                    safe_to_cache: is_safe_to_cache_prepared,
+                };
+                let instrumentation = Arc::clone(&instrumentation);
                 stmt_cache
-                    .cached_prepared_statement(
-                        key,
-                        sql.clone(),
-                        is_safe_to_cache_prepared,
+                    .cached_statement_non_generic(
+                        query_id,
+                        &helper,
+                        &Pg,
                         &bind_collector.metadata,
                         raw_connection.clone(),
-                        &instrumentation
+                        prepare_statement_helper,
+                        &mut move |event: InstrumentationEvent<'_>| {
+                            // we wrap this lock into another callback to prevent locking
+                            // the instrumentation longer than necessary
+                            instrumentation.lock().unwrap_or_else(|e| e.into_inner())
+                                .on_connection_event(event);
+                        },
                     )
                     .await?
                     .0
@@ -891,6 +914,16 @@ impl crate::pooled_connection::PoolableConnection for AsyncPgConnection {
         use crate::TransactionManager;
 
         Self::TransactionManager::is_broken_transaction_manager(self) || self.conn.is_closed()
+    }
+}
+
+impl QueryFragmentForCachedStatement<Pg> for QueryFragmentHelper {
+    fn construct_sql(&self, _backend: &Pg) -> QueryResult<String> {
+        Ok(self.sql.clone())
+    }
+
+    fn is_safe_to_cache_prepared(&self, _backend: &Pg) -> QueryResult<bool> {
+        Ok(self.safe_to_cache)
     }
 }
 

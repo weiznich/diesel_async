@@ -13,9 +13,6 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.78.0"
 
 [dependencies]
-diesel = { version = "~2.2.0", default-features = false, features = [
-  "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
-] }
 async-trait = "0.1.66"
 futures-channel = { version = "0.3.17", default-features = false, features = [
   "std",
@@ -39,13 +36,34 @@ deadpool = { version = "0.12", optional = true, default-features = false, featur
 mobc = { version = ">=0.7,<0.10", optional = true }
 scoped-futures = { version = "0.1", features = ["std"] }
 
+[dependencies.diesel]
+version = "~2.2.0"
+default-features = false
+features = [
+  "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
+]
+git = "https://github.com/diesel-rs/diesel"
+branch = "master"
+
 [dev-dependencies]
 tokio = { version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"] }
 cfg-if = "1"
 chrono = "0.4"
-diesel = { version = "2.2.0", default-features = false, features = ["chrono"] }
-diesel_migrations = "2.2.0"
 assert_matches = "1.0.1"
+
+[dev-dependencies.diesel]
+version = "~2.2.0"
+default-features = false
+features = [
+  "chrono"
+]
+git = "https://github.com/diesel-rs/diesel"
+branch = "master"
+
+[dev-dependencies.diesel_migrations]
+version = "2.2.0"
+git = "https://github.com/diesel-rs/diesel"
+branch = "master"
 
 [features]
 default = []

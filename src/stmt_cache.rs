@@ -1,91 +1,57 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-
-use diesel::backend::Backend;
-use diesel::connection::statement_cache::{MaybeCached, PrepareForCache, StatementCacheKey};
-use diesel::connection::Instrumentation;
-use diesel::connection::InstrumentationEvent;
+use diesel::connection::statement_cache::{MaybeCached, StatementCallbackReturnType};
 use diesel::QueryResult;
-use futures_util::{future, FutureExt};
+use futures_util::{future, FutureExt, TryFutureExt};
+use std::future::Future;
 
-#[derive(Default)]
-pub struct StmtCache<DB: Backend, S> {
-    cache: HashMap<StatementCacheKey<DB>, S>,
-}
+pub(crate) struct CallbackHelper<F>(pub(crate) F);
 
-type PrepareFuture<'a, F, S> = future::Either<
-    future::Ready<QueryResult<(MaybeCached<'a, S>, F)>>,
-    future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, F)>>,
+type PrepareFuture<'a, C, S> = future::Either<
+    future::Ready<QueryResult<(MaybeCached<'a, S>, C)>>,
+    future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, C)>>,
 >;
 
-#[async_trait::async_trait]
-pub trait PrepareCallback<S, M>: Sized {
-    async fn prepare(
+impl<'b, S, F, C> StatementCallbackReturnType<S, C> for CallbackHelper<F>
+where
+    F: Future<Output = QueryResult<(S, C)>> + Send + 'b,
+    S: 'static,
+{
+    type Return<'a> = PrepareFuture<'a, C, S>;
+
+    fn from_error<'a>(e: diesel::result::Error) -> Self::Return<'a> {
+        future::Either::Left(future::ready(Err(e)))
+    }
+
+    fn map_to_no_cache<'a>(self) -> Self::Return<'a>
+    where
+        Self: 'a,
+    {
+        future::Either::Right(
+            self.0
+                .map_ok(|(stmt, conn)| (MaybeCached::CannotCache(stmt), conn))
+                .boxed(),
+        )
+    }
+
+    fn map_to_cache<'a>(stmt: &'a mut S, conn: C) -> Self::Return<'a> {
+        future::Either::Left(future::ready(Ok((MaybeCached::Cached(stmt), conn))))
+    }
+
+    fn register_cache<'a>(
         self,
-        sql: &str,
-        metadata: &[M],
-        is_for_cache: PrepareForCache,
-    ) -> QueryResult<(S, Self)>;
+        callback: impl FnOnce(S) -> &'a mut S + Send + 'a,
+    ) -> Self::Return<'a>
+    where
+        Self: 'a,
+    {
+        future::Either::Right(
+            self.0
+                .map_ok(|(stmt, conn)| (MaybeCached::Cached(callback(stmt)), conn))
+                .boxed(),
+        )
+    }
 }
 
-impl<S, DB: Backend> StmtCache<DB, S> {
-    pub fn new() -> Self {
-        Self {
-            cache: HashMap::new(),
-        }
-    }
-
-    pub fn cached_prepared_statement<'a, F>(
-        &'a mut self,
-        cache_key: StatementCacheKey<DB>,
-        sql: String,
-        is_query_safe_to_cache: bool,
-        metadata: &[DB::TypeMetadata],
-        prepare_fn: F,
-        instrumentation: &std::sync::Mutex<Option<Box<dyn Instrumentation>>>,
-    ) -> PrepareFuture<'a, F, S>
-    where
-        S: Send,
-        DB::QueryBuilder: Default,
-        DB::TypeMetadata: Clone + Send + Sync,
-        F: PrepareCallback<S, DB::TypeMetadata> + Send + 'a,
-        StatementCacheKey<DB>: Hash + Eq,
-    {
-        use std::collections::hash_map::Entry::{Occupied, Vacant};
-
-        if !is_query_safe_to_cache {
-            let metadata = metadata.to_vec();
-            let f = async move {
-                let stmt = prepare_fn
-                    .prepare(&sql, &metadata, PrepareForCache::No)
-                    .await?;
-                Ok((MaybeCached::CannotCache(stmt.0), stmt.1))
-            }
-            .boxed();
-            return future::Either::Right(f);
-        }
-
-        match self.cache.entry(cache_key) {
-            Occupied(entry) => future::Either::Left(future::ready(Ok((
-                MaybeCached::Cached(entry.into_mut()),
-                prepare_fn,
-            )))),
-            Vacant(entry) => {
-                let metadata = metadata.to_vec();
-                instrumentation
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .on_connection_event(InstrumentationEvent::cache_query(&sql));
-                let f = async move {
-                    let statement = prepare_fn
-                        .prepare(&sql, &metadata, PrepareForCache::Yes)
-                        .await?;
-
-                    Ok((MaybeCached::Cached(entry.insert(statement.0)), statement.1))
-                }
-                .boxed();
-                future::Either::Right(f)
-            }
-        }
-    }
+pub(crate) struct QueryFragmentHelper {
+    pub(crate) sql: String,
+    pub(crate) safe_to_cache: bool,
 }
