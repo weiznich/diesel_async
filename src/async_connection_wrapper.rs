@@ -194,13 +194,15 @@ mod implementation {
         C: crate::AsyncConnection,
         B: BlockOn + Send,
     {
-        type Cursor<'conn, 'query> = AsyncCursorWrapper<'conn, C::Stream<'conn, 'query>, B>
-    where
-        Self: 'conn;
+        type Cursor<'conn, 'query>
+            = AsyncCursorWrapper<'conn, C::Stream<'conn, 'query>, B>
+        where
+            Self: 'conn;
 
-        type Row<'conn, 'query> = C::Row<'conn, 'query>
-    where
-        Self: 'conn;
+        type Row<'conn, 'query>
+            = C::Row<'conn, 'query>
+        where
+            Self: 'conn;
 
         fn load<'conn, 'query, T>(
             &'conn mut self,
