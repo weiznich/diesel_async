@@ -16,7 +16,11 @@ impl RowSealed for PgRow {}
 
 impl<'a> diesel::row::Row<'a, diesel::pg::Pg> for PgRow {
     type InnerPartialRow = Self;
-    type Field<'b> = PgField<'b> where Self: 'b, 'a: 'b;
+    type Field<'b>
+        = PgField<'b>
+    where
+        Self: 'b,
+        'a: 'b;
 
     fn field_count(&self) -> usize {
         self.row.len()

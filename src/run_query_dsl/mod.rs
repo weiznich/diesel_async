@@ -92,17 +92,21 @@ pub mod methods {
         DB: QueryMetadata<T::SqlType>,
         ST: 'static,
     {
-        type LoadFuture<'conn> = future::MapOk<
+        type LoadFuture<'conn>
+            = future::MapOk<
             Conn::LoadFuture<'conn, 'query>,
             fn(Conn::Stream<'conn, 'query>) -> Self::Stream<'conn>,
-        > where Conn: 'conn;
+        >
+        where
+            Conn: 'conn;
 
-        type Stream<'conn> = stream::Map<
+        type Stream<'conn>
+            = stream::Map<
             Conn::Stream<'conn, 'query>,
-            fn(
-                QueryResult<Conn::Row<'conn, 'query>>,
-            ) -> QueryResult<U>,
-        >where  Conn: 'conn;
+            fn(QueryResult<Conn::Row<'conn, 'query>>) -> QueryResult<U>,
+        >
+        where
+            Conn: 'conn;
 
         fn internal_load(self, conn: &mut Conn) -> Self::LoadFuture<'_> {
             conn.load(self)
