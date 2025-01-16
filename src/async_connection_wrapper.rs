@@ -234,7 +234,7 @@ mod implementation {
         runtime: &'a B,
     }
 
-    impl<'a, S, B> Iterator for AsyncCursorWrapper<'a, S, B>
+    impl<S, B> Iterator for AsyncCursorWrapper<'_, S, B>
     where
         S: Stream,
         B: BlockOn,
