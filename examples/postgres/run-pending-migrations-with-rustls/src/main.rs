@@ -4,6 +4,8 @@ use diesel_async::AsyncPgConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
+use rustls::ClientConfig;
+use rustls_platform_verifier::ConfigVerifierExt;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
@@ -28,9 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConnection>> {
     let fut = async {
         // We first set up the way we want rustls to work.
-        let rustls_config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_certs())
-            .with_no_client_auth();
+        let rustls_config = ClientConfig::with_platform_verifier();
         let tls = tokio_postgres_rustls::MakeRustlsConnect::new(rustls_config);
         let (client, conn) = tokio_postgres::connect(config, tls)
             .await
@@ -38,11 +38,4 @@ fn establish_connection(config: &str) -> BoxFuture<ConnectionResult<AsyncPgConne
         AsyncPgConnection::try_from_client_and_connection(client, conn).await
     };
     fut.boxed()
-}
-
-fn root_certs() -> rustls::RootCertStore {
-    let mut roots = rustls::RootCertStore::empty();
-    let certs = rustls_native_certs::load_native_certs().expect("Certs not loadable!");
-    roots.add_parsable_certificates(certs);
-    roots
 }
