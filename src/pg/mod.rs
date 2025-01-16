@@ -133,7 +133,6 @@ pub struct AsyncPgConnection {
     instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
 }
 
-#[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
         self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
@@ -154,7 +153,6 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-#[async_trait::async_trait]
 impl AsyncConnection for AsyncPgConnection {
     type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
     type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;

@@ -13,7 +13,6 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.78.0"
 
 [dependencies]
-async-trait = "0.1.66"
 futures-channel = { version = "0.3.17", default-features = false, features = [
   "std",
   "sink",
@@ -30,6 +29,7 @@ mysql_async = { version = "0.34", optional = true, default-features = false, fea
 mysql_common = { version = "0.32", optional = true, default-features = false }
 
 bb8 = { version = "0.9", optional = true }
+async-trait = { version = "0.1", optional = true }
 deadpool = { version = "0.12", optional = true, default-features = false, features = [
   "managed",
 ] }
@@ -66,7 +66,7 @@ git = "https://github.com/diesel-rs/diesel"
 branch = "master"
 
 [features]
-default = []
+default = ["postgres"]
 mysql = [
   "diesel/mysql_backend",
   "mysql_async",
@@ -80,7 +80,7 @@ sync-connection-wrapper = ["tokio/rt"]
 async-connection-wrapper = ["tokio/net"]
 pool = []
 r2d2 = ["pool", "diesel/r2d2"]
-bb8 = ["pool", "dep:bb8"]
+bb8 = ["pool", "dep:bb8", "dep:async-trait"]
 mobc = ["pool", "dep:mobc"]
 deadpool = ["pool", "dep:deadpool"]
 

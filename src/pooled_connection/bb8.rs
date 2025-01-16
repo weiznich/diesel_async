@@ -51,6 +51,8 @@
 //! # }
 //! ```
 
+use std::future::Future;
+
 use super::{AsyncDieselConnectionManager, PoolError, PoolableConnection};
 use bb8::ManageConnection;
 use diesel::query_builder::QueryFragment;
@@ -76,16 +78,23 @@ where
 
     type Error = PoolError;
 
-    async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        (self.manager_config.custom_setup)(&self.connection_url)
-            .await
-            .map_err(PoolError::ConnectionError)
+    fn connect(&self) -> impl Future<Output = Result<Self::Connection, Self::Error>> + Send {
+        async {
+            (self.manager_config.custom_setup)(&self.connection_url)
+                .await
+                .map_err(PoolError::ConnectionError)
+        }
     }
 
-    async fn is_valid(&self, conn: &mut Self::Connection) -> Result<(), Self::Error> {
-        conn.ping(&self.manager_config.recycling_method)
-            .await
-            .map_err(PoolError::QueryError)
+    fn is_valid(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async {
+            conn.ping(&self.manager_config.recycling_method)
+                .await
+                .map_err(PoolError::QueryError)
+        }
     }
 
     fn has_broken(&self, conn: &mut Self::Connection) -> bool {

@@ -7,6 +7,7 @@ use diesel::result::Error;
 use diesel::QueryResult;
 use scoped_futures::ScopedBoxFuture;
 use std::borrow::Cow;
+use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,7 +19,6 @@ use crate::AsyncConnection;
 ///
 /// You will not need to interact with this trait, unless you are writing an
 /// implementation of [`AsyncConnection`].
-#[async_trait::async_trait]
 pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// Data stored as part of the connection implementation
     /// to track the current transaction state of a connection
@@ -29,21 +29,21 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// If the transaction depth is greater than 0,
     /// this should create a savepoint instead.
     /// This function is expected to increment the transaction depth by 1.
-    async fn begin_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn begin_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Rollback the inner-most transaction or savepoint
     ///
     /// If the transaction depth is greater than 1,
     /// this should rollback to the most recent savepoint.
     /// This function is expected to decrement the transaction depth by 1.
-    async fn rollback_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn rollback_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Commit the inner-most transaction or savepoint
     ///
     /// If the transaction depth is greater than 1,
     /// this should release the most recent savepoint.
     /// This function is expected to decrement the transaction depth by 1.
-    async fn commit_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn commit_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Fetch the current transaction status as mutable
     ///
@@ -57,27 +57,35 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     ///
     /// Each implementation of this function needs to fulfill the documented
     /// behaviour of [`AsyncConnection::transaction`]
-    async fn transaction<'a, F, R, E>(conn: &mut Conn, callback: F) -> Result<R, E>
+    fn transaction<'a, 'conn, F, R, E>(
+        conn: &'conn mut Conn,
+        callback: F,
+    ) -> impl Future<Output = Result<R, E>> + Send + 'conn
     where
         F: for<'r> FnOnce(&'r mut Conn) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
         E: From<Error> + Send,
         R: Send,
+        'a: 'conn,
     {
-        Self::begin_transaction(conn).await?;
-        match callback(&mut *conn).await {
-            Ok(value) => {
-                Self::commit_transaction(conn).await?;
-                Ok(value)
-            }
-            Err(user_error) => match Self::rollback_transaction(conn).await {
-                Ok(()) => Err(user_error),
-                Err(Error::BrokenTransactionManager) => {
-                    // In this case we are probably more interested by the
-                    // original error, which likely caused this
-                    Err(user_error)
+        async move {
+            let callback = callback;
+
+            Self::begin_transaction(conn).await?;
+            match callback(&mut *conn).await {
+                Ok(value) => {
+                    Self::commit_transaction(conn).await?;
+                    Ok(value)
                 }
-                Err(rollback_error) => Err(rollback_error.into()),
-            },
+                Err(user_error) => match Self::rollback_transaction(conn).await {
+                    Ok(()) => Err(user_error),
+                    Err(Error::BrokenTransactionManager) => {
+                        // In this case we are probably more interested by the
+                        // original error, which likely caused this
+                        Err(user_error)
+                    }
+                    Err(rollback_error) => Err(rollback_error.into()),
+                },
+            }
         }
     }
 
@@ -193,124 +201,128 @@ impl AnsiTransactionManager {
     }
 }
 
-#[async_trait::async_trait]
 impl<Conn> TransactionManager<Conn> for AnsiTransactionManager
 where
     Conn: AsyncConnection<TransactionManager = Self>,
 {
     type TransactionStateData = Self;
 
-    async fn begin_transaction(conn: &mut Conn) -> QueryResult<()> {
-        let transaction_state = Self::get_transaction_state(conn)?;
-        let start_transaction_sql = match transaction_state.transaction_depth() {
-            None => Cow::from("BEGIN"),
-            Some(transaction_depth) => {
-                Cow::from(format!("SAVEPOINT diesel_savepoint_{transaction_depth}"))
-            }
-        };
-        let depth = transaction_state
-            .transaction_depth()
-            .and_then(|d| d.checked_add(1))
-            .unwrap_or(NonZeroU32::new(1).expect("It's not 0"));
-        conn.instrumentation()
-            .on_connection_event(InstrumentationEvent::begin_transaction(depth));
-        Self::critical_transaction_block(
-            &conn.transaction_state().is_broken.clone(),
-            conn.batch_execute(&start_transaction_sql),
-        )
-        .await?;
-        Self::get_transaction_state(conn)?
-            .change_transaction_depth(TransactionDepthChange::IncreaseDepth)?;
+    fn begin_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send {
+        async {
+            let transaction_state = Self::get_transaction_state(conn)?;
+            let start_transaction_sql = match transaction_state.transaction_depth() {
+                None => Cow::from("BEGIN"),
+                Some(transaction_depth) => {
+                    Cow::from(format!("SAVEPOINT diesel_savepoint_{transaction_depth}"))
+                }
+            };
+            let depth = transaction_state
+                .transaction_depth()
+                .and_then(|d| d.checked_add(1))
+                .unwrap_or(NonZeroU32::new(1).expect("It's not 0"));
+            conn.instrumentation()
+                .on_connection_event(InstrumentationEvent::begin_transaction(depth));
+            Self::critical_transaction_block(
+                &conn.transaction_state().is_broken.clone(),
+                conn.batch_execute(&start_transaction_sql),
+            )
+            .await?;
+            Self::get_transaction_state(conn)?
+                .change_transaction_depth(TransactionDepthChange::IncreaseDepth)?;
 
-        Ok(())
+            Ok(())
+        }
     }
 
-    async fn rollback_transaction(conn: &mut Conn) -> QueryResult<()> {
-        let transaction_state = Self::get_transaction_state(conn)?;
+    fn rollback_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send {
+        async {
+            let transaction_state = Self::get_transaction_state(conn)?;
 
-        let (
-            (rollback_sql, rolling_back_top_level),
-            requires_rollback_maybe_up_to_top_level_before_execute,
-        ) = match transaction_state.in_transaction {
-            Some(ref in_transaction) => (
-                match in_transaction.transaction_depth.get() {
-                    1 => (Cow::Borrowed("ROLLBACK"), true),
-                    depth_gt1 => (
-                        Cow::Owned(format!(
-                            "ROLLBACK TO SAVEPOINT diesel_savepoint_{}",
-                            depth_gt1 - 1
-                        )),
-                        false,
-                    ),
-                },
-                in_transaction.requires_rollback_maybe_up_to_top_level,
-            ),
-            None => return Err(Error::NotInTransaction),
-        };
+            let (
+                (rollback_sql, rolling_back_top_level),
+                requires_rollback_maybe_up_to_top_level_before_execute,
+            ) = match transaction_state.in_transaction {
+                Some(ref in_transaction) => (
+                    match in_transaction.transaction_depth.get() {
+                        1 => (Cow::Borrowed("ROLLBACK"), true),
+                        depth_gt1 => (
+                            Cow::Owned(format!(
+                                "ROLLBACK TO SAVEPOINT diesel_savepoint_{}",
+                                depth_gt1 - 1
+                            )),
+                            false,
+                        ),
+                    },
+                    in_transaction.requires_rollback_maybe_up_to_top_level,
+                ),
+                None => return Err(Error::NotInTransaction),
+            };
 
-        let depth = transaction_state
-            .transaction_depth()
-            .expect("We know that we are in a transaction here");
-        conn.instrumentation()
-            .on_connection_event(InstrumentationEvent::rollback_transaction(depth));
+            let depth = transaction_state
+                .transaction_depth()
+                .expect("We know that we are in a transaction here");
+            conn.instrumentation()
+                .on_connection_event(InstrumentationEvent::rollback_transaction(depth));
 
-        let is_broken = conn.transaction_state().is_broken.clone();
+            let is_broken = conn.transaction_state().is_broken.clone();
 
-        match Self::critical_transaction_block(&is_broken, conn.batch_execute(&rollback_sql)).await
-        {
-            Ok(()) => {
-                match Self::get_transaction_state(conn)?
-                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
-                {
-                    Ok(()) => {}
-                    Err(Error::NotInTransaction) if rolling_back_top_level => {
-                        // Transaction exit may have already been detected by connection
-                        // implementation. It's fine.
-                    }
-                    Err(e) => return Err(e),
-                }
-                Ok(())
-            }
-            Err(rollback_error) => {
-                let tm_status = Self::transaction_manager_status_mut(conn);
-                match tm_status {
-                    TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
-                        in_transaction:
-                            Some(InTransactionStatus {
-                                transaction_depth,
-                                requires_rollback_maybe_up_to_top_level,
-                                ..
-                            }),
-                        ..
-                    }) if transaction_depth.get() > 1 => {
-                        // A savepoint failed to rollback - we may still attempt to repair
-                        // the connection by rolling back higher levels.
-
-                        // To make it easier on the user (that they don't have to really
-                        // look at actual transaction depth and can just rely on the number
-                        // of times they have called begin/commit/rollback) we still
-                        // decrement here:
-                        *transaction_depth = NonZeroU32::new(transaction_depth.get() - 1)
-                            .expect("Depth was checked to be > 1");
-                        *requires_rollback_maybe_up_to_top_level = true;
-                        if requires_rollback_maybe_up_to_top_level_before_execute {
-                            // In that case, we tolerate that savepoint releases fail
-                            // -> we should ignore errors
-                            return Ok(());
+            match Self::critical_transaction_block(&is_broken, conn.batch_execute(&rollback_sql))
+                .await
+            {
+                Ok(()) => {
+                    match Self::get_transaction_state(conn)?
+                        .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
+                    {
+                        Ok(()) => {}
+                        Err(Error::NotInTransaction) if rolling_back_top_level => {
+                            // Transaction exit may have already been detected by connection
+                            // implementation. It's fine.
                         }
+                        Err(e) => return Err(e),
                     }
-                    TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
-                        in_transaction: None,
-                        ..
-                    }) => {
-                        // we would have returned `NotInTransaction` if that was already the state
-                        // before we made our call
-                        // => Transaction manager status has been fixed by the underlying connection
-                        // so we don't need to set_in_error
-                    }
-                    _ => tm_status.set_in_error(),
+                    Ok(())
                 }
-                Err(rollback_error)
+                Err(rollback_error) => {
+                    let tm_status = Self::transaction_manager_status_mut(conn);
+                    match tm_status {
+                        TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+                            in_transaction:
+                                Some(InTransactionStatus {
+                                    transaction_depth,
+                                    requires_rollback_maybe_up_to_top_level,
+                                    ..
+                                }),
+                            ..
+                        }) if transaction_depth.get() > 1 => {
+                            // A savepoint failed to rollback - we may still attempt to repair
+                            // the connection by rolling back higher levels.
+
+                            // To make it easier on the user (that they don't have to really
+                            // look at actual transaction depth and can just rely on the number
+                            // of times they have called begin/commit/rollback) we still
+                            // decrement here:
+                            *transaction_depth = NonZeroU32::new(transaction_depth.get() - 1)
+                                .expect("Depth was checked to be > 1");
+                            *requires_rollback_maybe_up_to_top_level = true;
+                            if requires_rollback_maybe_up_to_top_level_before_execute {
+                                // In that case, we tolerate that savepoint releases fail
+                                // -> we should ignore errors
+                                return Ok(());
+                            }
+                        }
+                        TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+                            in_transaction: None,
+                            ..
+                        }) => {
+                            // we would have returned `NotInTransaction` if that was already the state
+                            // before we made our call
+                            // => Transaction manager status has been fixed by the underlying connection
+                            // so we don't need to set_in_error
+                        }
+                        _ => tm_status.set_in_error(),
+                    }
+                    Err(rollback_error)
+                }
             }
         }
     }
@@ -320,71 +332,75 @@ where
     /// the original error will be returned, otherwise the error generated by the rollback
     /// will be returned. In the second case the connection will be considered broken
     /// as it contains a uncommitted unabortable open transaction.
-    async fn commit_transaction(conn: &mut Conn) -> QueryResult<()> {
-        let transaction_state = Self::get_transaction_state(conn)?;
-        let transaction_depth = transaction_state.transaction_depth();
-        let (commit_sql, committing_top_level) = match transaction_depth {
-            None => return Err(Error::NotInTransaction),
-            Some(transaction_depth) if transaction_depth.get() == 1 => {
-                (Cow::Borrowed("COMMIT"), true)
-            }
-            Some(transaction_depth) => (
-                Cow::Owned(format!(
-                    "RELEASE SAVEPOINT diesel_savepoint_{}",
-                    transaction_depth.get() - 1
-                )),
-                false,
-            ),
-        };
-        let depth = transaction_state
-            .transaction_depth()
-            .expect("We know that we are in a transaction here");
-        conn.instrumentation()
-            .on_connection_event(InstrumentationEvent::commit_transaction(depth));
-
-        let is_broken = conn.transaction_state().is_broken.clone();
-
-        match Self::critical_transaction_block(&is_broken, conn.batch_execute(&commit_sql)).await {
-            Ok(()) => {
-                match Self::get_transaction_state(conn)?
-                    .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
-                {
-                    Ok(()) => {}
-                    Err(Error::NotInTransaction) if committing_top_level => {
-                        // Transaction exit may have already been detected by connection.
-                        // It's fine
-                    }
-                    Err(e) => return Err(e),
+    fn commit_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send {
+        async {
+            let transaction_state = Self::get_transaction_state(conn)?;
+            let transaction_depth = transaction_state.transaction_depth();
+            let (commit_sql, committing_top_level) = match transaction_depth {
+                None => return Err(Error::NotInTransaction),
+                Some(transaction_depth) if transaction_depth.get() == 1 => {
+                    (Cow::Borrowed("COMMIT"), true)
                 }
-                Ok(())
-            }
-            Err(commit_error) => {
-                if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
-                    in_transaction:
-                        Some(InTransactionStatus {
-                            requires_rollback_maybe_up_to_top_level: true,
-                            ..
-                        }),
-                    ..
-                }) = conn.transaction_state().status
-                {
-                    match Self::critical_transaction_block(
-                        &is_broken,
-                        Self::rollback_transaction(conn),
-                    )
-                    .await
+                Some(transaction_depth) => (
+                    Cow::Owned(format!(
+                        "RELEASE SAVEPOINT diesel_savepoint_{}",
+                        transaction_depth.get() - 1
+                    )),
+                    false,
+                ),
+            };
+            let depth = transaction_state
+                .transaction_depth()
+                .expect("We know that we are in a transaction here");
+            conn.instrumentation()
+                .on_connection_event(InstrumentationEvent::commit_transaction(depth));
+
+            let is_broken = conn.transaction_state().is_broken.clone();
+
+            match Self::critical_transaction_block(&is_broken, conn.batch_execute(&commit_sql))
+                .await
+            {
+                Ok(()) => {
+                    match Self::get_transaction_state(conn)?
+                        .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
                     {
                         Ok(()) => {}
-                        Err(rollback_error) => {
-                            conn.transaction_state().status.set_in_error();
-                            return Err(Error::RollbackErrorOnCommit {
-                                rollback_error: Box::new(rollback_error),
-                                commit_error: Box::new(commit_error),
-                            });
+                        Err(Error::NotInTransaction) if committing_top_level => {
+                            // Transaction exit may have already been detected by connection.
+                            // It's fine
+                        }
+                        Err(e) => return Err(e),
+                    }
+                    Ok(())
+                }
+                Err(commit_error) => {
+                    if let TransactionManagerStatus::Valid(ValidTransactionManagerStatus {
+                        in_transaction:
+                            Some(InTransactionStatus {
+                                requires_rollback_maybe_up_to_top_level: true,
+                                ..
+                            }),
+                        ..
+                    }) = conn.transaction_state().status
+                    {
+                        match Self::critical_transaction_block(
+                            &is_broken,
+                            Self::rollback_transaction(conn),
+                        )
+                        .await
+                        {
+                            Ok(()) => {}
+                            Err(rollback_error) => {
+                                conn.transaction_state().status.set_in_error();
+                                return Err(Error::RollbackErrorOnCommit {
+                                    rollback_error: Box::new(rollback_error),
+                                    commit_error: Box::new(commit_error),
+                                });
+                            }
                         }
                     }
+                    Err(commit_error)
                 }
-                Err(commit_error)
             }
         }
     }

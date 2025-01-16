@@ -13,6 +13,7 @@ use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 use std::borrow::Cow;
 use std::fmt;
+use std::future::Future;
 use std::ops::DerefMut;
 
 #[cfg(feature = "bb8")]
@@ -164,7 +165,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<C> SimpleAsyncConnection for C
 where
     C: DerefMut + Send,
@@ -176,7 +176,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<C> AsyncConnection for C
 where
     C: DerefMut + Send,
@@ -251,7 +250,6 @@ where
 #[allow(missing_debug_implementations)]
 pub struct PoolTransactionManager<TM>(std::marker::PhantomData<TM>);
 
-#[async_trait::async_trait]
 impl<C, TM> TransactionManager<C> for PoolTransactionManager<TM>
 where
     C: DerefMut + Send,
@@ -283,17 +281,13 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<Changes, Output, Conn> UpdateAndFetchResults<Changes, Output> for Conn
 where
     Conn: DerefMut + Send,
     Changes: diesel::prelude::Identifiable + HasTable + Send,
     Conn::Target: UpdateAndFetchResults<Changes, Output>,
 {
-    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
-    where
-        Changes: 'async_trait,
-    {
+    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output> {
         self.deref_mut().update_and_fetch(changeset).await
     }
 }
@@ -321,13 +315,15 @@ impl diesel::query_builder::Query for CheckConnectionQuery {
 impl<C> diesel::query_dsl::RunQueryDsl<C> for CheckConnectionQuery {}
 
 #[doc(hidden)]
-#[async_trait::async_trait]
 pub trait PoolableConnection: AsyncConnection {
     /// Check if a connection is still valid
     ///
     /// The default implementation will perform a check based on the provided
     /// recycling method variant
-    async fn ping(&mut self, config: &RecyclingMethod<Self>) -> diesel::QueryResult<()>
+    fn ping(
+        &mut self,
+        config: &RecyclingMethod<Self>,
+    ) -> impl Future<Output = diesel::QueryResult<()>> + Send
     where
         for<'a> Self: 'a,
         diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
@@ -337,19 +333,21 @@ pub trait PoolableConnection: AsyncConnection {
         use crate::run_query_dsl::RunQueryDsl;
         use diesel::IntoSql;
 
-        match config {
-            RecyclingMethod::Fast => Ok(()),
-            RecyclingMethod::Verified => {
-                diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
+        async move {
+            match config {
+                RecyclingMethod::Fast => Ok(()),
+                RecyclingMethod::Verified => {
+                    diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
+                        .execute(self)
+                        .await
+                        .map(|_| ())
+                }
+                RecyclingMethod::CustomQuery(query) => diesel::sql_query(query.as_ref())
                     .execute(self)
                     .await
-                    .map(|_| ())
+                    .map(|_| ()),
+                RecyclingMethod::CustomFunction(c) => c(self).await,
             }
-            RecyclingMethod::CustomQuery(query) => diesel::sql_query(query.as_ref())
-                .execute(self)
-                .await
-                .map(|_| ()),
-            RecyclingMethod::CustomFunction(c) => c(self).await,
         }
     }
 
