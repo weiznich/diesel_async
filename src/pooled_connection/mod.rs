@@ -8,7 +8,7 @@
 use crate::{AsyncConnection, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
-use diesel::connection::Instrumentation;
+use diesel::connection::{CacheSize, Instrumentation};
 use diesel::QueryResult;
 use futures_util::{future, FutureExt};
 use std::borrow::Cow;
@@ -240,6 +240,10 @@ where
 
     fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
         self.deref_mut().set_instrumentation(instrumentation);
+    }
+
+    fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
+        self.deref_mut().set_prepared_statement_cache_size(size);
     }
 }
 

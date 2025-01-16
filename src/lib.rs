@@ -74,7 +74,7 @@
 )]
 
 use diesel::backend::Backend;
-use diesel::connection::Instrumentation;
+use diesel::connection::{CacheSize, Instrumentation};
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::result::Error;
 use diesel::row::Row;
@@ -354,4 +354,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
 
     /// Set a specific [`Instrumentation`] implementation for this connection
     fn set_instrumentation(&mut self, instrumentation: impl Instrumentation);
+
+    /// Set the prepared statement cache size to [`CacheSize`] for this connection
+    fn set_prepared_statement_cache_size(&mut self, size: CacheSize);
 }

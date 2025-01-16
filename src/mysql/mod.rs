@@ -1,9 +1,11 @@
-use crate::stmt_cache::{PrepareCallback, StmtCache};
+use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
-use diesel::connection::statement_cache::{MaybeCached, StatementCacheKey};
-use diesel::connection::Instrumentation;
-use diesel::connection::InstrumentationEvent;
+use diesel::connection::statement_cache::{
+    MaybeCached, QueryFragmentForCachedStatement, StatementCache,
+};
 use diesel::connection::StrQueryHelper;
+use diesel::connection::{CacheSize, Instrumentation};
+use diesel::connection::{DynInstrumentation, InstrumentationEvent};
 use diesel::mysql::{Mysql, MysqlQueryBuilder, MysqlType};
 use diesel::query_builder::QueryBuilder;
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
@@ -27,9 +29,9 @@ use self::serialize::ToSqlHelper;
 /// `mysql://[user[:password]@]host/database_name`
 pub struct AsyncMysqlConnection {
     conn: mysql_async::Conn,
-    stmt_cache: StmtCache<Mysql, Statement>,
+    stmt_cache: StatementCache<Mysql, Statement>,
     transaction_manager: AnsiTransactionManager,
-    instrumentation: std::sync::Mutex<Option<Box<dyn Instrumentation>>>,
+    instrumentation: DynInstrumentation,
 }
 
 #[async_trait::async_trait]
@@ -72,7 +74,7 @@ impl AsyncConnection for AsyncMysqlConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> diesel::ConnectionResult<Self> {
-        let mut instrumentation = diesel::connection::get_default_instrumentation();
+        let mut instrumentation = DynInstrumentation::default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
             database_url,
         ));
@@ -82,7 +84,7 @@ impl AsyncConnection for AsyncMysqlConnection {
             r.as_ref().err(),
         ));
         let mut conn = r?;
-        conn.instrumentation = std::sync::Mutex::new(instrumentation);
+        conn.instrumentation = instrumentation;
         Ok(conn)
     }
 
@@ -177,16 +179,15 @@ impl AsyncConnection for AsyncMysqlConnection {
     }
 
     fn instrumentation(&mut self) -> &mut dyn Instrumentation {
-        self.instrumentation
-            .get_mut()
-            .unwrap_or_else(|p| p.into_inner())
+        &mut *self.instrumentation
     }
 
     fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
-        *self
-            .instrumentation
-            .get_mut()
-            .unwrap_or_else(|p| p.into_inner()) = Some(Box::new(instrumentation));
+        self.instrumentation = instrumentation.into();
+    }
+
+    fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
+        self.stmt_cache.set_cache_size(size);
     }
 }
 
@@ -207,17 +208,24 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-#[async_trait::async_trait]
-impl PrepareCallback<Statement, MysqlType> for &'_ mut mysql_async::Conn {
-    async fn prepare(
-        self,
-        sql: &str,
-        _metadata: &[MysqlType],
-        _is_for_cache: diesel::connection::statement_cache::PrepareForCache,
-    ) -> QueryResult<(Statement, Self)> {
-        let s = self.prep(sql).await.map_err(ErrorHelper)?;
-        Ok((s, self))
-    }
+fn prepare_statement_helper<'a, 'b>(
+    conn: &'a mut mysql_async::Conn,
+    sql: &'b str,
+    _is_for_cache: diesel::connection::statement_cache::PrepareForCache,
+    _metadata: &[MysqlType],
+) -> CallbackHelper<impl Future<Output = QueryResult<(Statement, &'a mut mysql_async::Conn)>> + Send>
+{
+    // ideally we wouldn't clone the SQL string here
+    // but as we usually cache statements anyway
+    // this is a fixed one time const
+    //
+    // The probleme with not cloning it is that we then cannot express
+    // the right result lifetime anymore (at least not easily)
+    let sql = sql.to_owned();
+    CallbackHelper(async move {
+        let s = conn.prep(sql).await.map_err(ErrorHelper)?;
+        Ok((s, conn))
+    })
 }
 
 impl AsyncMysqlConnection {
@@ -229,11 +237,9 @@ impl AsyncMysqlConnection {
         use crate::run_query_dsl::RunQueryDsl;
         let mut conn = AsyncMysqlConnection {
             conn,
-            stmt_cache: StmtCache::new(),
+            stmt_cache: StatementCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
-            instrumentation: std::sync::Mutex::new(
-                diesel::connection::get_default_instrumentation(),
-            ),
+            instrumentation: DynInstrumentation::default_instrumentation(),
         };
 
         for stmt in CONNECTION_SETUP_QUERIES {
@@ -286,36 +292,29 @@ impl AsyncMysqlConnection {
             } = bind_collector?;
             let is_safe_to_cache_prepared = is_safe_to_cache_prepared?;
             let sql = sql?;
+            let helper = QueryFragmentHelper {
+                sql,
+                safe_to_cache: is_safe_to_cache_prepared,
+            };
             let inner = async {
-                let cache_key = if let Some(query_id) = query_id {
-                    StatementCacheKey::Type(query_id)
-                } else {
-                    StatementCacheKey::Sql {
-                        sql: sql.clone(),
-                        bind_types: metadata.clone(),
-                    }
-                };
-
                 let (stmt, conn) = stmt_cache
-                    .cached_prepared_statement(
-                        cache_key,
-                        sql.clone(),
-                        is_safe_to_cache_prepared,
+                    .cached_statement_non_generic(
+                        query_id,
+                        &helper,
+                        &Mysql,
                         &metadata,
                         conn,
-                        instrumentation,
+                        prepare_statement_helper,
+                        &mut **instrumentation,
                     )
                     .await?;
                 callback(conn, stmt, ToSqlHelper { metadata, binds }).await
             };
             let r = update_transaction_manager_status(inner.await, transaction_manager);
-            instrumentation
-                .get_mut()
-                .unwrap_or_else(|p| p.into_inner())
-                .on_connection_event(InstrumentationEvent::finish_query(
-                    &StrQueryHelper::new(&sql),
-                    r.as_ref().err(),
-                ));
+            instrumentation.on_connection_event(InstrumentationEvent::finish_query(
+                &StrQueryHelper::new(&helper.sql),
+                r.as_ref().err(),
+            ));
             r
         }
         .boxed()
@@ -370,9 +369,9 @@ impl AsyncMysqlConnection {
 
         Ok(AsyncMysqlConnection {
             conn,
-            stmt_cache: StmtCache::new(),
+            stmt_cache: StatementCache::new(),
             transaction_manager: AnsiTransactionManager::default(),
-            instrumentation: std::sync::Mutex::new(None),
+            instrumentation: DynInstrumentation::none(),
         })
     }
 }
@@ -425,5 +424,15 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+}
+
+impl QueryFragmentForCachedStatement<Mysql> for QueryFragmentHelper {
+    fn construct_sql(&self, _backend: &Mysql) -> QueryResult<String> {
+        Ok(self.sql.clone())
+    }
+
+    fn is_safe_to_cache_prepared(&self, _backend: &Mysql) -> QueryResult<bool> {
+        Ok(self.safe_to_cache)
     }
 }
