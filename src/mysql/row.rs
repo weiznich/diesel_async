@@ -229,6 +229,7 @@ fn convert_type(column_type: ColumnType, column_flags: ColumnFlags) -> MysqlType
         | ColumnType::MYSQL_TYPE_UNKNOWN
         | ColumnType::MYSQL_TYPE_ENUM
         | ColumnType::MYSQL_TYPE_SET
+        | ColumnType::MYSQL_TYPE_VECTOR
         | ColumnType::MYSQL_TYPE_GEOMETRY => {
             unimplemented!("Hit an unsupported type: {:?}", column_type)
         }
