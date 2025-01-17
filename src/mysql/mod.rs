@@ -34,7 +34,6 @@ pub struct AsyncMysqlConnection {
     instrumentation: DynInstrumentation,
 }
 
-#[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncMysqlConnection {
     async fn batch_execute(&mut self, query: &str) -> diesel::QueryResult<()> {
         self.instrumentation()
@@ -63,7 +62,6 @@ const CONNECTION_SETUP_QUERIES: &[&str] = &[
     "SET character_set_results = 'utf8mb4'",
 ];
 
-#[async_trait::async_trait]
 impl AsyncConnection for AsyncMysqlConnection {
     type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
     type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
@@ -208,9 +206,9 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-fn prepare_statement_helper<'a, 'b>(
+fn prepare_statement_helper<'a>(
     conn: &'a mut mysql_async::Conn,
-    sql: &'b str,
+    sql: &str,
     _is_for_cache: diesel::connection::statement_cache::PrepareForCache,
     _metadata: &[MysqlType],
 ) -> CallbackHelper<impl Future<Output = QueryResult<(Statement, &'a mut mysql_async::Conn)>> + Send>

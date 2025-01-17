@@ -7,6 +7,7 @@ use diesel::result::Error;
 use diesel::QueryResult;
 use scoped_futures::ScopedBoxFuture;
 use std::borrow::Cow;
+use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,7 +19,6 @@ use crate::AsyncConnection;
 ///
 /// You will not need to interact with this trait, unless you are writing an
 /// implementation of [`AsyncConnection`].
-#[async_trait::async_trait]
 pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// Data stored as part of the connection implementation
     /// to track the current transaction state of a connection
@@ -29,21 +29,21 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     /// If the transaction depth is greater than 0,
     /// this should create a savepoint instead.
     /// This function is expected to increment the transaction depth by 1.
-    async fn begin_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn begin_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Rollback the inner-most transaction or savepoint
     ///
     /// If the transaction depth is greater than 1,
     /// this should rollback to the most recent savepoint.
     /// This function is expected to decrement the transaction depth by 1.
-    async fn rollback_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn rollback_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Commit the inner-most transaction or savepoint
     ///
     /// If the transaction depth is greater than 1,
     /// this should release the most recent savepoint.
     /// This function is expected to decrement the transaction depth by 1.
-    async fn commit_transaction(conn: &mut Conn) -> QueryResult<()>;
+    fn commit_transaction(conn: &mut Conn) -> impl Future<Output = QueryResult<()>> + Send;
 
     /// Fetch the current transaction status as mutable
     ///
@@ -57,27 +57,35 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
     ///
     /// Each implementation of this function needs to fulfill the documented
     /// behaviour of [`AsyncConnection::transaction`]
-    async fn transaction<'a, F, R, E>(conn: &mut Conn, callback: F) -> Result<R, E>
+    fn transaction<'a, 'conn, F, R, E>(
+        conn: &'conn mut Conn,
+        callback: F,
+    ) -> impl Future<Output = Result<R, E>> + Send + 'conn
     where
         F: for<'r> FnOnce(&'r mut Conn) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
         E: From<Error> + Send,
         R: Send,
+        'a: 'conn,
     {
-        Self::begin_transaction(conn).await?;
-        match callback(&mut *conn).await {
-            Ok(value) => {
-                Self::commit_transaction(conn).await?;
-                Ok(value)
-            }
-            Err(user_error) => match Self::rollback_transaction(conn).await {
-                Ok(()) => Err(user_error),
-                Err(Error::BrokenTransactionManager) => {
-                    // In this case we are probably more interested by the
-                    // original error, which likely caused this
-                    Err(user_error)
+        async move {
+            let callback = callback;
+
+            Self::begin_transaction(conn).await?;
+            match callback(&mut *conn).await {
+                Ok(value) => {
+                    Self::commit_transaction(conn).await?;
+                    Ok(value)
                 }
-                Err(rollback_error) => Err(rollback_error.into()),
-            },
+                Err(user_error) => match Self::rollback_transaction(conn).await {
+                    Ok(()) => Err(user_error),
+                    Err(Error::BrokenTransactionManager) => {
+                        // In this case we are probably more interested by the
+                        // original error, which likely caused this
+                        Err(user_error)
+                    }
+                    Err(rollback_error) => Err(rollback_error.into()),
+                },
+            }
         }
     }
 
@@ -193,7 +201,6 @@ impl AnsiTransactionManager {
     }
 }
 
-#[async_trait::async_trait]
 impl<Conn> TransactionManager<Conn> for AnsiTransactionManager
 where
     Conn: AsyncConnection<TransactionManager = Self>,

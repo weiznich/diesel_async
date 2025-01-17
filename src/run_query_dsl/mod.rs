@@ -3,7 +3,9 @@ use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
+use futures_util::future::BoxFuture;
 use futures_util::{future, stream, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use std::future::Future;
 use std::pin::Pin;
 
 /// The traits used by `QueryDsl`.
@@ -699,15 +701,20 @@ impl<T, Conn> RunQueryDsl<Conn> for T {}
 /// #     Ok(())
 /// # }
 /// ```
-#[async_trait::async_trait]
 pub trait SaveChangesDsl<Conn> {
     /// See the trait documentation
-    async fn save_changes<T>(self, connection: &mut Conn) -> QueryResult<T>
+    fn save_changes<'life0, 'async_trait, T>(
+        self,
+        connection: &'life0 mut Conn,
+    ) -> impl Future<Output = QueryResult<T>> + Send + 'async_trait
     where
         Self: Sized + diesel::prelude::Identifiable,
         Conn: UpdateAndFetchResults<Self, T>,
+        T: 'async_trait,
+        'life0: 'async_trait,
+        Self: ::core::marker::Send + 'async_trait,
     {
-        connection.update_and_fetch(self).await
+        connection.update_and_fetch(self)
     }
 }
 
@@ -726,58 +733,69 @@ impl<T, Conn> SaveChangesDsl<Conn> for T where
 /// For implementing this trait for a custom backend:
 /// * The `Changes` generic parameter represents the changeset that should be stored
 /// * The `Output` generic parameter represents the type of the response.
-#[async_trait::async_trait]
 pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnection
 where
     Changes: diesel::prelude::Identifiable + HasTable,
 {
     /// See the traits documentation.
-    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
+    fn update_and_fetch<'conn, 'changes>(
+        &'conn mut self,
+        changeset: Changes,
+    ) -> BoxFuture<'changes, QueryResult<Output>>
+    // cannot use impl future due to rustc bugs
+    // https://github.com/rust-lang/rust/issues/135619
+    //impl Future<Output = QueryResult<Output>> + Send + 'changes
     where
-        Changes: 'async_trait;
+        Changes: 'changes,
+        'conn: 'changes,
+        Self: 'changes;
 }
 
 #[cfg(feature = "mysql")]
-#[async_trait::async_trait]
-impl<'b, Changes, Output> UpdateAndFetchResults<Changes, Output> for crate::AsyncMysqlConnection
+impl<'b, Changes, Output, Tab, V> UpdateAndFetchResults<Changes, Output>
+    for crate::AsyncMysqlConnection
 where
-    Output: Send,
-    Changes: Copy + diesel::Identifiable + Send,
-    Changes: AsChangeset<Target = <Changes as HasTable>::Table> + IntoUpdateTarget,
-    Changes::Table: diesel::query_dsl::methods::FindDsl<Changes::Id> + Send,
-    Changes::WhereClause: Send,
-    Changes::Changeset: Send,
-    Changes::Id: Send,
-    diesel::dsl::Update<Changes, Changes>: methods::ExecuteDsl<crate::AsyncMysqlConnection>,
+    Output: Send + 'static,
+    Changes:
+        Copy + AsChangeset<Target = Tab> + Send + diesel::associations::Identifiable<Table = Tab>,
+    Tab: diesel::Table + diesel::query_dsl::methods::FindDsl<Changes::Id> + 'b,
+    diesel::dsl::Find<Tab, Changes::Id>: IntoUpdateTarget<Table = Tab, WhereClause = V>,
+    diesel::query_builder::UpdateStatement<Tab, V, Changes::Changeset>:
+        diesel::query_builder::AsQuery,
+    diesel::dsl::Update<Changes, Changes>: methods::ExecuteDsl<Self>,
+    V: Send + 'b,
+    Changes::Changeset: Send + 'b,
+    Changes::Id: 'b,
+    Tab::FromClause: Send,
     diesel::dsl::Find<Changes::Table, Changes::Id>:
-        methods::LoadQuery<'b, crate::AsyncMysqlConnection, Output> + Send + 'b,
-    <Changes::Table as diesel::Table>::AllColumns: diesel::expression::ValidGrouping<()>,
-    <<Changes::Table as diesel::Table>::AllColumns as diesel::expression::ValidGrouping<()>>::IsAggregate: diesel::expression::MixedAggregates<
-        diesel::expression::is_aggregate::No,
-        Output = diesel::expression::is_aggregate::No,
-    >,
-    <Changes::Table as diesel::query_source::QuerySource>::FromClause: Send,
+        methods::LoadQuery<'b, crate::AsyncMysqlConnection, Output> + Send,
 {
-    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
+    fn update_and_fetch<'conn, 'changes>(
+        &'conn mut self,
+        changeset: Changes,
+    ) -> BoxFuture<'changes, QueryResult<Output>>
     where
-        Changes: 'async_trait,
+        Changes: 'changes,
+        Changes::Changeset: 'changes,
+        'conn: 'changes,
+        Self: 'changes,
     {
-        use diesel::query_dsl::methods::FindDsl;
-
-        diesel::update(changeset)
-            .set(changeset)
-            .execute(self)
-            .await?;
-        Changes::table().find(changeset.id()).get_result(self).await
+        async move {
+            diesel::update(changeset)
+                .set(changeset)
+                .execute(self)
+                .await?;
+            Changes::table().find(changeset.id()).get_result(self).await
+        }
+        .boxed()
     }
 }
 
 #[cfg(feature = "postgres")]
-#[async_trait::async_trait]
 impl<'b, Changes, Output, Tab, V> UpdateAndFetchResults<Changes, Output>
     for crate::AsyncPgConnection
 where
-    Output: Send,
+    Output: Send + 'static,
     Changes:
         Copy + AsChangeset<Target = Tab> + Send + diesel::associations::Identifiable<Table = Tab>,
     Tab: diesel::Table + diesel::query_dsl::methods::FindDsl<Changes::Id> + 'b,
@@ -789,14 +807,22 @@ where
     Changes::Changeset: Send + 'b,
     Tab::FromClause: Send,
 {
-    async fn update_and_fetch(&mut self, changeset: Changes) -> QueryResult<Output>
+    fn update_and_fetch<'conn, 'changes>(
+        &'conn mut self,
+        changeset: Changes,
+    ) -> BoxFuture<'changes, QueryResult<Output>>
     where
-        Changes: 'async_trait,
-        Changes::Changeset: 'async_trait,
+        Changes: 'changes,
+        Changes::Changeset: 'changes,
+        'conn: 'changes,
+        Self: 'changes,
     {
-        diesel::update(changeset)
-            .set(changeset)
-            .get_result(self)
-            .await
+        async move {
+            diesel::update(changeset)
+                .set(changeset)
+                .get_result(self)
+                .await
+        }
+        .boxed()
     }
 }

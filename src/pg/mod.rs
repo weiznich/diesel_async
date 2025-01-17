@@ -133,7 +133,6 @@ pub struct AsyncPgConnection {
     instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
 }
 
-#[async_trait::async_trait]
 impl SimpleAsyncConnection for AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
         self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
@@ -154,7 +153,6 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-#[async_trait::async_trait]
 impl AsyncConnection for AsyncPgConnection {
     type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
     type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
@@ -306,9 +304,9 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-fn prepare_statement_helper<'a>(
+fn prepare_statement_helper(
     conn: Arc<tokio_postgres::Client>,
-    sql: &'a str,
+    sql: &str,
     _is_for_cache: PrepareForCache,
     metadata: &[PgTypeMetadata],
 ) -> CallbackHelper<

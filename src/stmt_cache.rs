@@ -10,9 +10,9 @@ type PrepareFuture<'a, C, S> = future::Either<
     future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, C)>>,
 >;
 
-impl<'b, S, F, C> StatementCallbackReturnType<S, C> for CallbackHelper<F>
+impl<S, F, C> StatementCallbackReturnType<S, C> for CallbackHelper<F>
 where
-    F: Future<Output = QueryResult<(S, C)>> + Send + 'b,
+    F: Future<Output = QueryResult<(S, C)>> + Send,
     S: 'static,
 {
     type Return<'a> = PrepareFuture<'a, C, S>;
@@ -32,7 +32,7 @@ where
         )
     }
 
-    fn map_to_cache<'a>(stmt: &'a mut S, conn: C) -> Self::Return<'a> {
+    fn map_to_cache(stmt: &mut S, conn: C) -> Self::Return<'_> {
         future::Either::Left(future::ready(Ok((MaybeCached::Cached(stmt), conn))))
     }
 

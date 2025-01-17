@@ -132,7 +132,7 @@ pub struct MysqlField<'a> {
     name: Cow<'a, str>,
 }
 
-impl<'a> diesel::row::Field<'a, Mysql> for MysqlField<'_> {
+impl diesel::row::Field<'_, Mysql> for MysqlField<'_> {
     fn field_name(&self) -> Option<&str> {
         Some(&*self.name)
     }

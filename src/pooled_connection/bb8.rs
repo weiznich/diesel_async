@@ -50,7 +50,6 @@
 //! #     Ok(())
 //! # }
 //! ```
-
 use super::{AsyncDieselConnectionManager, PoolError, PoolableConnection};
 use bb8::ManageConnection;
 use diesel::query_builder::QueryFragment;

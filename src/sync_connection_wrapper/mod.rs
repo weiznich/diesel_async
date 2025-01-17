@@ -77,7 +77,6 @@ pub struct SyncConnectionWrapper<C> {
     inner: Arc<Mutex<C>>,
 }
 
-#[async_trait::async_trait]
 impl<C> SimpleAsyncConnection for SyncConnectionWrapper<C>
 where
     C: diesel::connection::Connection + 'static,
@@ -89,7 +88,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<C, MD, O> AsyncConnection for SyncConnectionWrapper<C>
 where
     // Backend bounds
@@ -207,7 +205,6 @@ where
 /// A wrapper of a diesel transaction manager usable in async context.
 pub struct SyncTransactionManagerWrapper<T>(PhantomData<T>);
 
-#[async_trait::async_trait]
 impl<T, C> TransactionManager<SyncConnectionWrapper<C>> for SyncTransactionManagerWrapper<T>
 where
     SyncConnectionWrapper<C>: AsyncConnection,
