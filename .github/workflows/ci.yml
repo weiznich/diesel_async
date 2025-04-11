@@ -22,9 +22,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: ["stable", "beta", "nightly"]
+        rust: ["stable"]
         backend: ["postgres", "mysql", "sqlite"]
-        os: [ubuntu-latest, macos-13, macos-15, windows-2019]
+        os:
+          [ubuntu-latest, macos-13, macos-15, windows-latest, ubuntu-22.04-arm]
+        include:
+          - rust: "beta"
+            backend: "postgres"
+            os: "ubuntu-latest"
+          - rust: "beta"
+            backend: "sqlite"
+            os: "ubuntu-latest"
+          - rust: "beta"
+            backend: "mysql"
+            os: "ubuntu-latest"
+          - rust: "nightly"
+            backend: "postgres"
+            os: "ubuntu-latest"
+          - rust: "nightly"
+            backend: "sqlite"
+            os: "ubuntu-latest"
+          - rust: "nightly"
+            backend: "mysql"
+            os: "ubuntu-latest"
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
@@ -43,7 +63,7 @@ jobs:
 
       - name: Set environment variables
         shell: bash
-        if: matrix.backend == 'postgres' && matrix.os == 'windows-2019'
+        if: matrix.backend == 'postgres' && matrix.os == 'windows-latest'
         run: |
           echo "AWS_LC_SYS_NO_ASM=1"
 
@@ -55,7 +75,7 @@ jobs:
           echo "RUSTDOCFLAGS=-D warnings" >> $GITHUB_ENV
 
       - uses: ilammy/setup-nasm@v1
-        if: matrix.backend == 'postgres' && matrix.os == 'windows-2019'
+        if: matrix.backend == 'postgres' && matrix.os == 'windows-latest'
 
       - name: Install postgres (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'postgres'
@@ -78,37 +98,8 @@ jobs:
       - name: Install sqlite (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'sqlite'
         run: |
-          curl -fsS --retry 3 -o sqlite-autoconf-3400100.tar.gz https://www.sqlite.org/2022/sqlite-autoconf-3400100.tar.gz
-          tar zxf sqlite-autoconf-3400100.tar.gz
-          cd sqlite-autoconf-3400100
-          CFLAGS="$CFLAGS -O2 -fno-strict-aliasing \
-              -DSQLITE_DEFAULT_FOREIGN_KEYS=1 \
-              -DSQLITE_SECURE_DELETE \
-              -DSQLITE_ENABLE_COLUMN_METADATA \
-              -DSQLITE_ENABLE_FTS3_PARENTHESIS \
-              -DSQLITE_ENABLE_RTREE=1 \
-              -DSQLITE_SOUNDEX=1 \
-              -DSQLITE_ENABLE_UNLOCK_NOTIFY \
-              -DSQLITE_OMIT_LOOKASIDE=1 \
-              -DSQLITE_ENABLE_DBSTAT_VTAB \
-              -DSQLITE_ENABLE_UPDATE_DELETE_LIMIT=1 \
-              -DSQLITE_ENABLE_LOAD_EXTENSION \
-              -DSQLITE_ENABLE_JSON1 \
-              -DSQLITE_LIKE_DOESNT_MATCH_BLOBS \
-              -DSQLITE_THREADSAFE=1 \
-              -DSQLITE_ENABLE_FTS3_TOKENIZER=1 \
-              -DSQLITE_MAX_SCHEMA_RETRY=25 \
-              -DSQLITE_ENABLE_PREUPDATE_HOOK \
-              -DSQLITE_ENABLE_SESSION \
-              -DSQLITE_ENABLE_STMTVTAB \
-              -DSQLITE_MAX_VARIABLE_NUMBER=250000" \
-          ./configure --prefix=/usr \
-              --enable-threadsafe \
-              --enable-dynamic-extensions \
-              --libdir=/usr/lib/x86_64-linux-gnu \
-              --libexecdir=/usr/lib/x86_64-linux-gnu/sqlite3
-          sudo make
-          sudo make install
+          sudo apt-get update
+          sudo apt-get install libsqlite3-dev
           echo "DATABASE_URL=/tmp/test.db" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
@@ -184,8 +175,9 @@ jobs:
         run: |
           choco install sqlite
           cd /D C:\ProgramData\chocolatey\lib\SQLite\tools
-          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           lib /machine:x64 /def:sqlite3.def /out:sqlite3.lib
+
       - name: Set variables for sqlite (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'sqlite'
         shell: bash
