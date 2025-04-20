@@ -23,10 +23,10 @@ futures-util = { version = "0.3.17", default-features = false, features = [
 ] }
 tokio-postgres = { version = "0.7.10", optional = true }
 tokio = { version = "1.26", optional = true }
-mysql_async = { version = "0.35", optional = true, default-features = false, features = [
+mysql_async = { version = "0.36.0", optional = true, default-features = false, features = [
   "minimal-rust",
 ] }
-mysql_common = { version = "0.34", optional = true, default-features = false }
+mysql_common = { version = "0.35.3", optional = true, default-features = false }
 
 bb8 = { version = "0.9", optional = true }
 async-trait = { version = "0.1.66", optional = true }
