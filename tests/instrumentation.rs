@@ -54,9 +54,14 @@ impl From<InstrumentationEvent<'_>> for Event {
 }
 
 async fn setup_test_case() -> (Arc<Mutex<Vec<Event>>>, TestConnection) {
+    setup_test_case_with_connection(connection_with_sean_and_tess_in_users_table().await)
+}
+
+fn setup_test_case_with_connection(
+    mut conn: TestConnection,
+) -> (Arc<Mutex<Vec<Event>>>, TestConnection) {
     let events = Arc::new(Mutex::new(Vec::<Event>::new()));
     let events_to_check = events.clone();
-    let mut conn = connection_with_sean_and_tess_in_users_table().await;
     conn.set_instrumentation(move |event: InstrumentationEvent<'_>| {
         events.lock().unwrap().push(event.into());
     });
@@ -254,4 +259,27 @@ async fn check_events_transaction_nested() {
     assert_matches!(events[9], Event::CommitTransaction { .. });
     assert_matches!(events[10], Event::StartQuery { .. });
     assert_matches!(events[11], Event::FinishQuery { .. });
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn check_events_transaction_builder() {
+    use crate::connection_without_transaction;
+    use diesel::result::Error;
+    use scoped_futures::ScopedFutureExt;
+
+    let (events_to_check, mut conn) =
+        setup_test_case_with_connection(connection_without_transaction().await);
+    conn.build_transaction()
+        .run(|_tx| async move { Ok::<(), Error>(()) }.scope_boxed())
+        .await
+        .unwrap();
+    let events = events_to_check.lock().unwrap();
+    assert_eq!(events.len(), 6, "{:?}", events);
+    assert_matches!(events[0], Event::BeginTransaction { .. });
+    assert_matches!(events[1], Event::StartQuery { .. });
+    assert_matches!(events[2], Event::FinishQuery { .. });
+    assert_matches!(events[3], Event::CommitTransaction { .. });
+    assert_matches!(events[4], Event::StartQuery { .. });
+    assert_matches!(events[5], Event::FinishQuery { .. });
 }

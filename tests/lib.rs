@@ -203,8 +203,7 @@ async fn setup(connection: &mut TestConnection) {
 }
 
 async fn connection() -> TestConnection {
-    let db_url = std::env::var("DATABASE_URL").unwrap();
-    let mut conn = TestConnection::establish(&db_url).await.unwrap();
+    let mut conn = connection_without_transaction().await;
     if cfg!(feature = "postgres") {
         // postgres allows to modify the schema inside of a transaction
         conn.begin_test_transaction().await.unwrap();
@@ -217,4 +216,9 @@ async fn connection() -> TestConnection {
         conn.begin_test_transaction().await.unwrap();
     }
     conn
+}
+
+async fn connection_without_transaction() -> TestConnection {
+    let db_url = std::env::var("DATABASE_URL").unwrap();
+    TestConnection::establish(&db_url).await.unwrap()
 }
