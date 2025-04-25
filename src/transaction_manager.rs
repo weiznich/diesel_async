@@ -169,15 +169,21 @@ impl AnsiTransactionManager {
     {
         let is_broken = conn.transaction_state().is_broken.clone();
         let state = Self::get_transaction_state(conn)?;
-        match state.transaction_depth() {
-            None => {
-                Self::critical_transaction_block(&is_broken, conn.batch_execute(sql)).await?;
-                Self::get_transaction_state(conn)?
-                    .change_transaction_depth(TransactionDepthChange::IncreaseDepth)?;
-                Ok(())
-            }
-            Some(_depth) => Err(Error::AlreadyInTransaction),
+        if let Some(_depth) = state.transaction_depth() {
+            return Err(Error::AlreadyInTransaction);
         }
+        let instrumentation_depth = NonZeroU32::new(1);
+
+        conn.instrumentation()
+            .on_connection_event(InstrumentationEvent::begin_transaction(
+                instrumentation_depth.expect("We know that 1 is not zero"),
+            ));
+
+        // Keep remainder of this method in sync with `begin_transaction()`.
+        Self::critical_transaction_block(&is_broken, conn.batch_execute(sql)).await?;
+        Self::get_transaction_state(conn)?
+            .change_transaction_depth(TransactionDepthChange::IncreaseDepth)?;
+        Ok(())
     }
 
     // This function should be used to await any connection
