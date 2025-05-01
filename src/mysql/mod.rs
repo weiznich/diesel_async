@@ -71,6 +71,7 @@ impl AsyncConnection for AsyncMysqlConnection {
 
     type TransactionManager = AnsiTransactionManager;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn establish(database_url: &str) -> diesel::ConnectionResult<Self> {
         let mut instrumentation = DynInstrumentation::default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(

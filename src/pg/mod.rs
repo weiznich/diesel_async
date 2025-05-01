@@ -161,6 +161,7 @@ impl AsyncConnection for AsyncPgConnection {
     type Backend = diesel::pg::Pg;
     type TransactionManager = AnsiTransactionManager;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
         let mut instrumentation = DynInstrumentation::default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
@@ -396,6 +397,7 @@ impl AsyncPgConnection {
 
     /// Constructs a new `AsyncPgConnection` from an existing [`tokio_postgres::Client`] and
     /// [`tokio_postgres::Connection`]
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn try_from_client_and_connection<S>(
         client: tokio_postgres::Client,
         conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
@@ -877,6 +879,7 @@ async fn drive_future<R>(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn drive_connection<S>(
     conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
 ) -> (
@@ -889,7 +892,18 @@ where
     let (error_tx, error_rx) = tokio::sync::broadcast::channel(1);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::spawn(async move {
+        match futures_util::future::select(shutdown_rx, conn).await {
+            Either::Left(_) | Either::Right((Ok(_), _)) => {}
+            Either::Right((Err(e), _)) => {
+                let _ = error_tx.send(Arc::new(e));
+            }
+        }
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(async move {
         match futures_util::future::select(shutdown_rx, conn).await {
             Either::Left(_) | Either::Right((Ok(_), _)) => {}
             Either::Right((Err(e), _)) => {
