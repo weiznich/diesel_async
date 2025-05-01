@@ -29,6 +29,7 @@ use futures_util::TryFutureExt;
 use futures_util::{Future, FutureExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -397,13 +398,13 @@ impl AsyncPgConnection {
 
     /// Constructs a new `AsyncPgConnection` from an existing [`tokio_postgres::Client`] and
     /// [`tokio_postgres::Connection`]
-    #[cfg(not(target_arch = "wasm32"))]
-    pub async fn try_from_client_and_connection<S>(
+    pub async fn try_from_client_and_connection<S, T>(
         client: tokio_postgres::Client,
-        conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
+        conn: tokio_postgres::Connection<S, T>,
     ) -> ConnectionResult<Self>
     where
-        S: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
     {
         let (error_rx, shutdown_tx) = drive_connection(conn);
 
@@ -879,15 +880,15 @@ async fn drive_future<R>(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn drive_connection<S>(
-    conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
+fn drive_connection<S, T>(
+    conn: tokio_postgres::Connection<S, T>,
 ) -> (
     broadcast::Receiver<Arc<tokio_postgres::Error>>,
     oneshot::Sender<()>,
 )
 where
-    S: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
 {
     let (error_tx, error_rx) = tokio::sync::broadcast::channel(1);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
