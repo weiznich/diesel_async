@@ -112,6 +112,7 @@ where
     type Backend = <C as Connection>::Backend;
     type TransactionManager = SyncTransactionManagerWrapper<<C as Connection>::TransactionManager>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
         let database_url = database_url.to_string();
         tokio::task::spawn_blocking(move || C::establish(&database_url))

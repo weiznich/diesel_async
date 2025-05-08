@@ -193,6 +193,7 @@ where
     type TransactionManager =
         PoolTransactionManager<<C::Target as AsyncConnection>::TransactionManager>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn establish(_database_url: &str) -> diesel::ConnectionResult<Self> {
         Err(diesel::result::ConnectionError::BadConnection(
             String::from("Cannot directly establish a pooled connection"),

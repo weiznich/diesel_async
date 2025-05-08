@@ -29,6 +29,7 @@ use futures_util::TryFutureExt;
 use futures_util::{Future, FutureExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -161,6 +162,7 @@ impl AsyncConnection for AsyncPgConnection {
     type Backend = diesel::pg::Pg;
     type TransactionManager = AnsiTransactionManager;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
         let mut instrumentation = DynInstrumentation::default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
@@ -396,12 +398,13 @@ impl AsyncPgConnection {
 
     /// Constructs a new `AsyncPgConnection` from an existing [`tokio_postgres::Client`] and
     /// [`tokio_postgres::Connection`]
-    pub async fn try_from_client_and_connection<S>(
+    pub async fn try_from_client_and_connection<S, T>(
         client: tokio_postgres::Client,
-        conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
+        conn: tokio_postgres::Connection<S, T>,
     ) -> ConnectionResult<Self>
     where
-        S: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
     {
         let (error_rx, shutdown_tx) = drive_connection(conn);
 
@@ -877,19 +880,31 @@ async fn drive_future<R>(
     }
 }
 
-fn drive_connection<S>(
-    conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
+fn drive_connection<S, T>(
+    conn: tokio_postgres::Connection<S, T>,
 ) -> (
     broadcast::Receiver<Arc<tokio_postgres::Error>>,
     oneshot::Sender<()>,
 )
 where
-    S: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    T: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
 {
     let (error_tx, error_rx) = tokio::sync::broadcast::channel(1);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
+    #[cfg(not(target_arch = "wasm32"))]
     tokio::spawn(async move {
+        match futures_util::future::select(shutdown_rx, conn).await {
+            Either::Left(_) | Either::Right((Ok(_), _)) => {}
+            Either::Right((Err(e), _)) => {
+                let _ = error_tx.send(Arc::new(e));
+            }
+        }
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(async move {
         match futures_util::future::select(shutdown_rx, conn).await {
             Either::Left(_) | Either::Right((Ok(_), _)) => {}
             Either::Right((Err(e), _)) => {

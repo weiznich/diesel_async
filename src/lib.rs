@@ -149,6 +149,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// The argument to this method and the method's behavior varies by backend.
     /// See the documentation for that backend's connection class
     /// for details about what it accepts and how it behaves.
+    #[cfg(not(target_arch = "wasm32"))]
     fn establish(database_url: &str) -> impl Future<Output = ConnectionResult<Self>> + Send;
 
     /// Executes the given function inside of a database transaction
