@@ -32,9 +32,56 @@ pub trait SpawnBlocking {
     fn get_runtime() -> Self;
 }
 
+/// A wrapper of a [`diesel::connection::Connection`] usable in async context.
+///
+/// It implements AsyncConnection if [`diesel::connection::Connection`] fullfils requirements:
+/// * it's a [`diesel::connection::LoadConnection`]
+/// * its [`diesel::connection::Connection::Backend`] has a [`diesel::query_builder::BindCollector`] implementing [`diesel::query_builder::MoveableBindCollector`]
+/// * its [`diesel::connection::LoadConnection::Row`] implements [`diesel::row::IntoOwnedRow`]
+///
+/// Internally this wrapper type will use `spawn_blocking` on tokio
+/// to execute the request on the inner connection. This implies a
+/// dependency on tokio and that the runtime is running.
+///
+/// Note that only SQLite is supported at the moment.
+///
+/// # Examples
+///
+/// ```rust
+/// # include!("../doctest_setup.rs");
+/// use diesel_async::RunQueryDsl;
+/// use schema::users;
+///
+/// async fn some_async_fn() {
+/// # let database_url = database_url();
+///          use diesel_async::AsyncConnection;
+///          use diesel::sqlite::SqliteConnection;
+///          let mut conn =
+///          SyncConnectionWrapper::<SqliteConnection>::establish(&database_url).await.unwrap();
+/// # create_tables(&mut conn).await;
+///
+///          let all_users = users::table.load::<(i32, String)>(&mut conn).await.unwrap();
+/// #         assert_eq!(all_users.len(), 2);
+/// }
+///
+/// # #[cfg(feature = "sqlite")]
+/// # #[tokio::main]
+/// # async fn main() {
+/// #    some_async_fn().await;
+/// # }
+/// ```
 #[cfg(feature = "tokio")]
 pub type SyncConnectionWrapper<C, B = self::implementation::Tokio> = self::implementation::SyncConnectionWrapper<C, B>;
 
+/// A wrapper of a [`diesel::connection::Connection`] usable in async context.
+///
+/// It implements AsyncConnection if [`diesel::connection::Connection`] fullfils requirements:
+/// * it's a [`diesel::connection::LoadConnection`]
+/// * its [`diesel::connection::Connection::Backend`] has a [`diesel::query_builder::BindCollector`] implementing [`diesel::query_builder::MoveableBindCollector`]
+/// * its [`diesel::connection::LoadConnection::Row`] implements [`diesel::row::IntoOwnedRow`]
+///
+/// Internally this wrapper type will use `spawn_blocking` on given type implementing [`SpawnBlocking`] trait
+/// to execute the request on the inner connection.
 #[cfg(not(feature = "tokio"))]
 pub use self::implementation::SyncConnectionWrapper;
 
@@ -66,44 +113,6 @@ mod implementation {
         )
     }
 
-    /// A wrapper of a [`diesel::connection::Connection`] usable in async context.
-    ///
-    /// It implements AsyncConnection if [`diesel::connection::Connection`] fullfils requirements:
-    /// * it's a [`diesel::connection::LoadConnection`]
-    /// * its [`diesel::connection::Connection::Backend`] has a [`diesel::query_builder::BindCollector`] implementing [`diesel::query_builder::MoveableBindCollector`]
-    /// * its [`diesel::connection::LoadConnection::Row`] implements [`diesel::row::IntoOwnedRow`]
-    ///
-    /// Internally this wrapper type will use `spawn_blocking` on tokio
-    /// to execute the request on the inner connection. This implies a
-    /// dependency on tokio and that the runtime is running.
-    ///
-    /// Note that only SQLite is supported at the moment.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # include!("../doctest_setup.rs");
-    /// use diesel_async::RunQueryDsl;
-    /// use schema::users;
-    ///
-    /// async fn some_async_fn() {
-    /// # let database_url = database_url();
-    ///          use diesel_async::AsyncConnection;
-    ///          use diesel::sqlite::SqliteConnection;
-    ///          let mut conn =
-    ///          SyncConnectionWrapper::<SqliteConnection>::establish(&database_url).await.unwrap();
-    /// # create_tables(&mut conn).await;
-    ///
-    ///          let all_users = users::table.load::<(i32, String)>(&mut conn).await.unwrap();
-    /// #         assert_eq!(all_users.len(), 2);
-    /// }
-    ///
-    /// # #[cfg(feature = "sqlite")]
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// #    some_async_fn().await;
-    /// # }
-    /// ```
     pub struct SyncConnectionWrapper<C, S> {
         inner: Arc<Mutex<C>>,
         runtime: S,
