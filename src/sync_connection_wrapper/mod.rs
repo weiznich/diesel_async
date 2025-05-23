@@ -6,8 +6,8 @@
 //!
 //! * using a sync Connection implementation in async context
 //! * using the same code base for async crates needing multiple backends
-use std::error::Error;
 use futures_util::future::BoxFuture;
+use std::error::Error;
 
 #[cfg(feature = "sqlite")]
 mod sqlite;
@@ -71,7 +71,8 @@ pub trait SpawnBlocking {
 /// # }
 /// ```
 #[cfg(feature = "tokio")]
-pub type SyncConnectionWrapper<C, B = self::implementation::Tokio> = self::implementation::SyncConnectionWrapper<C, B>;
+pub type SyncConnectionWrapper<C, B = self::implementation::Tokio> =
+    self::implementation::SyncConnectionWrapper<C, B>;
 
 /// A wrapper of a [`diesel::connection::Connection`] usable in async context.
 ///
@@ -106,7 +107,9 @@ mod implementation {
 
     use super::*;
 
-    fn from_spawn_blocking_error(error: Box<dyn Error + Send + Sync + 'static>) -> diesel::result::Error {
+    fn from_spawn_blocking_error(
+        error: Box<dyn Error + Send + Sync + 'static>,
+    ) -> diesel::result::Error {
         diesel::result::Error::DatabaseError(
             diesel::result::DatabaseErrorKind::UnableToSendCommand,
             Box::new(error.to_string()),
@@ -149,18 +152,21 @@ mod implementation {
         // SpawnBlocking bounds
         S: SpawnBlocking + Send,
     {
-        type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
+        type LoadFuture<'conn, 'query> =
+            BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
         type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
         type Stream<'conn, 'query> = BoxStream<'static, QueryResult<Self::Row<'conn, 'query>>>;
         type Row<'conn, 'query> = O;
         type Backend = <C as Connection>::Backend;
-        type TransactionManager = SyncTransactionManagerWrapper<<C as Connection>::TransactionManager>;
+        type TransactionManager =
+            SyncTransactionManagerWrapper<<C as Connection>::TransactionManager>;
 
         async fn establish(database_url: &str) -> ConnectionResult<Self> {
             let database_url = database_url.to_string();
             let mut runtime = S::get_runtime();
 
-            runtime.spawn_blocking(move || C::establish(&database_url))
+            runtime
+                .spawn_blocking(move || C::establish(&database_url))
                 .await
                 .unwrap_or_else(|e| Err(diesel::ConnectionError::BadConnection(e.to_string())))
                 .map(move |c| SyncConnectionWrapper::with_runtime(c, runtime))
@@ -192,16 +198,22 @@ mod implementation {
             .boxed()
         }
 
-        fn execute_returning_count<'query, T>(&mut self, source: T) -> Self::ExecuteFuture<'_, 'query>
+        fn execute_returning_count<'query, T>(
+            &mut self,
+            source: T,
+        ) -> Self::ExecuteFuture<'_, 'query>
         where
             T: QueryFragment<Self::Backend> + QueryId,
         {
-            self.execute_with_prepared_query(source, |conn, query| conn.execute_returning_count(&query))
+            self.execute_with_prepared_query(source, |conn, query| {
+                conn.execute_returning_count(&query)
+            })
         }
 
         fn transaction_state(
             &mut self,
-        ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData {
+        ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData
+        {
             self.exclusive_connection().transaction_state()
         }
 
@@ -344,16 +356,17 @@ mod implementation {
             S: SpawnBlocking,
         {
             let inner = self.inner.clone();
-            self.runtime.spawn_blocking(move || {
-                let mut inner = inner.lock().unwrap_or_else(|poison| {
-                    // try to be resilient by providing the guard
-                    inner.clear_poison();
-                    poison.into_inner()
-                });
-                task(&mut inner)
-            })
-            .unwrap_or_else(|err| QueryResult::Err(from_spawn_blocking_error(err)))
-            .boxed()
+            self.runtime
+                .spawn_blocking(move || {
+                    let mut inner = inner.lock().unwrap_or_else(|poison| {
+                        // try to be resilient by providing the guard
+                        inner.clear_poison();
+                        poison.into_inner()
+                    });
+                    task(&mut inner)
+                })
+                .unwrap_or_else(|err| QueryResult::Err(from_spawn_blocking_error(err)))
+                .boxed()
         }
 
         fn execute_with_prepared_query<'a, MD, Q, R>(
@@ -448,7 +461,7 @@ mod implementation {
     #[cfg(feature = "tokio")]
     pub enum Tokio {
         Handle(tokio::runtime::Handle),
-        Runtime(tokio::runtime::Runtime)
+        Runtime(tokio::runtime::Runtime),
     }
 
     #[cfg(feature = "tokio")]
@@ -462,12 +475,10 @@ mod implementation {
         {
             let fut = match self {
                 Tokio::Handle(handle) => handle.spawn_blocking(task),
-                Tokio::Runtime(runtime) => runtime.spawn_blocking(task)
+                Tokio::Runtime(runtime) => runtime.spawn_blocking(task),
             };
 
-            fut
-                .map_err(|err| Box::from(err))
-                .boxed()
+            fut.map_err(|err| Box::from(err)).boxed()
         }
 
         fn get_runtime() -> Self {
