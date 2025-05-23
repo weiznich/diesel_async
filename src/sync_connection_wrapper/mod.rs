@@ -6,11 +6,38 @@
 //!
 //! * using a sync Connection implementation in async context
 //! * using the same code base for async crates needing multiple backends
+use std::error::Error;
+use futures_util::future::BoxFuture;
 
 #[cfg(feature = "sqlite")]
 mod sqlite;
 
+/// This is a helper trait that allows to customize the
+/// spawning blocking tasks as part of the
+/// [`SyncConnectionWrapper`] type. By default a
+/// tokio runtime and its spawn_blocking function is used.
+pub trait SpawnBlocking {
+    /// This function should allow to execute a
+    /// given blocking task without blocking the caller
+    /// to get the result
+    fn spawn_blocking<'a, R>(
+        &mut self,
+        task: impl FnOnce() -> R + Send + 'static,
+    ) -> BoxFuture<'a, Result<R, Box<dyn Error + Send + Sync + 'static>>>
+    where
+        R: Send + 'static;
+
+    /// This function should be used to construct
+    /// a new runtime instance
+    fn get_runtime() -> Self;
+}
+
+#[cfg(feature = "tokio")]
+pub type SyncConnectionWrapper<C, B = self::implementation::Tokio> = self::implementation::SyncConnectionWrapper<C, B>;
+
+#[cfg(not(feature = "tokio"))]
 pub use self::implementation::SyncConnectionWrapper;
+
 pub use self::implementation::SyncTransactionManagerWrapper;
 
 mod implementation {
@@ -25,17 +52,17 @@ mod implementation {
     };
     use diesel::row::IntoOwnedRow;
     use diesel::{ConnectionResult, QueryResult};
-    use futures_util::future::BoxFuture;
     use futures_util::stream::BoxStream;
     use futures_util::{FutureExt, StreamExt, TryFutureExt};
     use std::marker::PhantomData;
     use std::sync::{Arc, Mutex};
-    use tokio::task::JoinError;
 
-    fn from_tokio_join_error(join_error: JoinError) -> diesel::result::Error {
+    use super::*;
+
+    fn from_spawn_blocking_error(error: Box<dyn Error + Send + Sync + 'static>) -> diesel::result::Error {
         diesel::result::Error::DatabaseError(
             diesel::result::DatabaseErrorKind::UnableToSendCommand,
-            Box::new(join_error.to_string()),
+            Box::new(error.to_string()),
         )
     }
 
@@ -77,13 +104,15 @@ mod implementation {
     /// #    some_async_fn().await;
     /// # }
     /// ```
-    pub struct SyncConnectionWrapper<C> {
+    pub struct SyncConnectionWrapper<C, S> {
         inner: Arc<Mutex<C>>,
+        runtime: S,
     }
 
-    impl<C> SimpleAsyncConnection for SyncConnectionWrapper<C>
+    impl<C, S> SimpleAsyncConnection for SyncConnectionWrapper<C, S>
     where
         C: diesel::connection::Connection + 'static,
+        S: SpawnBlocking + Send,
     {
         async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
             let query = query.to_string();
@@ -92,7 +121,7 @@ mod implementation {
         }
     }
 
-    impl<C, MD, O> AsyncConnection for SyncConnectionWrapper<C>
+    impl<C, S, MD, O> AsyncConnection for SyncConnectionWrapper<C, S>
     where
         // Backend bounds
         <C as Connection>::Backend: std::default::Default + DieselReserveSpecialization,
@@ -108,6 +137,8 @@ mod implementation {
         O: 'static + Send + for<'conn> diesel::row::Row<'conn, C::Backend>,
         for<'conn, 'query> <C as LoadConnection>::Row<'conn, 'query>:
             IntoOwnedRow<'conn, <C as Connection>::Backend, OwnedRow = O>,
+        // SpawnBlocking bounds
+        S: SpawnBlocking + Send,
     {
         type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
         type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
@@ -118,10 +149,12 @@ mod implementation {
 
         async fn establish(database_url: &str) -> ConnectionResult<Self> {
             let database_url = database_url.to_string();
-            tokio::task::spawn_blocking(move || C::establish(&database_url))
+            let mut runtime = S::get_runtime();
+
+            runtime.spawn_blocking(move || C::establish(&database_url))
                 .await
                 .unwrap_or_else(|e| Err(diesel::ConnectionError::BadConnection(e.to_string())))
-                .map(|c| SyncConnectionWrapper::new(c))
+                .map(move |c| SyncConnectionWrapper::with_runtime(c, runtime))
         }
 
         fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
@@ -209,44 +242,60 @@ mod implementation {
     /// A wrapper of a diesel transaction manager usable in async context.
     pub struct SyncTransactionManagerWrapper<T>(PhantomData<T>);
 
-    impl<T, C> TransactionManager<SyncConnectionWrapper<C>> for SyncTransactionManagerWrapper<T>
+    impl<T, C, S> TransactionManager<SyncConnectionWrapper<C, S>> for SyncTransactionManagerWrapper<T>
     where
-        SyncConnectionWrapper<C>: AsyncConnection,
+        SyncConnectionWrapper<C, S>: AsyncConnection,
         C: Connection + 'static,
+        S: SpawnBlocking,
         T: diesel::connection::TransactionManager<C> + Send,
     {
         type TransactionStateData = T::TransactionStateData;
 
-        async fn begin_transaction(conn: &mut SyncConnectionWrapper<C>) -> QueryResult<()> {
+        async fn begin_transaction(conn: &mut SyncConnectionWrapper<C, S>) -> QueryResult<()> {
             conn.spawn_blocking(move |inner| T::begin_transaction(inner))
                 .await
         }
 
-        async fn commit_transaction(conn: &mut SyncConnectionWrapper<C>) -> QueryResult<()> {
+        async fn commit_transaction(conn: &mut SyncConnectionWrapper<C, S>) -> QueryResult<()> {
             conn.spawn_blocking(move |inner| T::commit_transaction(inner))
                 .await
         }
 
-        async fn rollback_transaction(conn: &mut SyncConnectionWrapper<C>) -> QueryResult<()> {
+        async fn rollback_transaction(conn: &mut SyncConnectionWrapper<C, S>) -> QueryResult<()> {
             conn.spawn_blocking(move |inner| T::rollback_transaction(inner))
                 .await
         }
 
         fn transaction_manager_status_mut(
-            conn: &mut SyncConnectionWrapper<C>,
+            conn: &mut SyncConnectionWrapper<C, S>,
         ) -> &mut TransactionManagerStatus {
             T::transaction_manager_status_mut(conn.exclusive_connection())
         }
     }
 
-    impl<C> SyncConnectionWrapper<C> {
+    impl<C, S> SyncConnectionWrapper<C, S> {
         /// Builds a wrapper with this underlying sync connection
         pub fn new(connection: C) -> Self
         where
             C: Connection,
+            S: SpawnBlocking,
         {
             SyncConnectionWrapper {
                 inner: Arc::new(Mutex::new(connection)),
+                runtime: S::get_runtime(),
+            }
+        }
+
+        /// Builds a wrapper with this underlying sync connection
+        /// and runtime for spawning blocking tasks
+        pub fn with_runtime(connection: C, runtime: S) -> Self
+        where
+            C: Connection,
+            S: SpawnBlocking,
+        {
+            SyncConnectionWrapper {
+                inner: Arc::new(Mutex::new(connection)),
+                runtime,
             }
         }
 
@@ -283,9 +332,10 @@ mod implementation {
         where
             C: Connection + 'static,
             R: Send + 'static,
+            S: SpawnBlocking,
         {
             let inner = self.inner.clone();
-            tokio::task::spawn_blocking(move || {
+            self.runtime.spawn_blocking(move || {
                 let mut inner = inner.lock().unwrap_or_else(|poison| {
                     // try to be resilient by providing the guard
                     inner.clear_poison();
@@ -293,7 +343,7 @@ mod implementation {
                 });
                 task(&mut inner)
             })
-            .unwrap_or_else(|err| QueryResult::Err(from_tokio_join_error(err)))
+            .unwrap_or_else(|err| QueryResult::Err(from_spawn_blocking_error(err)))
             .boxed()
         }
 
@@ -316,6 +366,8 @@ mod implementation {
             // Arguments/Return bounds
             Q: QueryFragment<C::Backend> + QueryId,
             R: Send + 'static,
+            // SpawnBlocking bounds
+            S: SpawnBlocking,
         {
             let backend = C::Backend::default();
 
@@ -381,6 +433,45 @@ mod implementation {
     {
         fn is_broken(&mut self) -> bool {
             Self::TransactionManager::is_broken_transaction_manager(self)
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    pub enum Tokio {
+        Handle(tokio::runtime::Handle),
+        Runtime(tokio::runtime::Runtime)
+    }
+
+    #[cfg(feature = "tokio")]
+    impl SpawnBlocking for Tokio {
+        fn spawn_blocking<'a, R>(
+            &mut self,
+            task: impl FnOnce() -> R + Send + 'static,
+        ) -> BoxFuture<'a, Result<R, Box<dyn Error + Send + Sync + 'static>>>
+        where
+            R: Send + 'static,
+        {
+            let fut = match self {
+                Tokio::Handle(handle) => handle.spawn_blocking(task),
+                Tokio::Runtime(runtime) => runtime.spawn_blocking(task)
+            };
+
+            fut
+                .map_err(|err| Box::from(err))
+                .boxed()
+        }
+
+        fn get_runtime() -> Self {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                Tokio::Handle(handle)
+            } else {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()
+                    .unwrap();
+
+                Tokio::Runtime(runtime)
+            }
         }
     }
 }
