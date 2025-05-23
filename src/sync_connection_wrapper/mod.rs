@@ -475,7 +475,6 @@ mod implementation {
                 Tokio::Handle(handle)
             } else {
                 let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_io()
                     .build()
                     .unwrap();
 
