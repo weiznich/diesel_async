@@ -436,7 +436,7 @@ mod implementation {
         feature = "mobc",
         feature = "r2d2"
     ))]
-    impl<C> crate::pooled_connection::PoolableConnection for SyncConnectionWrapper<C>
+    impl<C, S> crate::pooled_connection::PoolableConnection for SyncConnectionWrapper<C, S>
     where
         Self: AsyncConnection,
     {
