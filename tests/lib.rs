@@ -9,6 +9,7 @@ mod custom_types;
 mod instrumentation;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
+mod run_query_dsl_impl_match;
 #[cfg(feature = "async-connection-wrapper")]
 mod sync_wrapper;
 mod type_check;
