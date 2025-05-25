@@ -10,7 +10,7 @@ repository = "https://github.com/weiznich/diesel_async"
 keywords = ["orm", "database", "sql", "async"]
 categories = ["database"]
 description = "An async extension for Diesel the safe, extensible ORM and Query Builder"
-rust-version = "1.78.0"
+rust-version = "1.82.0"
 
 [dependencies]
 futures-channel = { version = "0.3.17", default-features = false, features = [
