@@ -3,8 +3,9 @@ use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
-use futures_util::future::BoxFuture;
-use futures_util::{future, stream, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_core::future::BoxFuture;
+use futures_core::Stream;
+use futures_util::{future, stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use std::future::Future;
 use std::pin::Pin;
 

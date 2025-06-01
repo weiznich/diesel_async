@@ -13,6 +13,7 @@ description = "An async extension for Diesel the safe, extensible ORM and Query 
 rust-version = "1.82.0"
 
 [dependencies]
+futures-core = "0.3.17"
 futures-channel = { version = "0.3.17", default-features = false, features = [
   "std",
   "sink",

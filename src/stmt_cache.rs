@@ -1,5 +1,6 @@
 use diesel::connection::statement_cache::{MaybeCached, StatementCallbackReturnType};
 use diesel::QueryResult;
+use futures_core::future::BoxFuture;
 use futures_util::{future, FutureExt, TryFutureExt};
 use std::future::Future;
 
@@ -7,7 +8,7 @@ pub(crate) struct CallbackHelper<F>(pub(crate) F);
 
 type PrepareFuture<'a, C, S> = future::Either<
     future::Ready<QueryResult<(MaybeCached<'a, S>, C)>>,
-    future::BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, C)>>,
+    BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, C)>>,
 >;
 
 impl<S, F, C> StatementCallbackReturnType<S, C> for CallbackHelper<F>

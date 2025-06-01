@@ -78,8 +78,9 @@ use diesel::connection::{CacheSize, Instrumentation};
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
-use futures_util::future::BoxFuture;
-use futures_util::{FutureExt, Stream};
+use futures_core::future::BoxFuture;
+use futures_core::Stream;
+use futures_util::FutureExt;
 use std::fmt::Debug;
 use std::future::Future;
 
