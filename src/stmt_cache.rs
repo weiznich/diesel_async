@@ -1,12 +1,13 @@
 use diesel::connection::statement_cache::{MaybeCached, StatementCallbackReturnType};
 use diesel::QueryResult;
 use futures_core::future::BoxFuture;
-use futures_util::{future, FutureExt, TryFutureExt};
-use std::future::Future;
+use futures_util::future::Either;
+use futures_util::{FutureExt, TryFutureExt};
+use std::future::{self, Future};
 
 pub(crate) struct CallbackHelper<F>(pub(crate) F);
 
-type PrepareFuture<'a, C, S> = future::Either<
+type PrepareFuture<'a, C, S> = Either<
     future::Ready<QueryResult<(MaybeCached<'a, S>, C)>>,
     BoxFuture<'a, QueryResult<(MaybeCached<'a, S>, C)>>,
 >;
@@ -19,14 +20,14 @@ where
     type Return<'a> = PrepareFuture<'a, C, S>;
 
     fn from_error<'a>(e: diesel::result::Error) -> Self::Return<'a> {
-        future::Either::Left(future::ready(Err(e)))
+        Either::Left(future::ready(Err(e)))
     }
 
     fn map_to_no_cache<'a>(self) -> Self::Return<'a>
     where
         Self: 'a,
     {
-        future::Either::Right(
+        Either::Right(
             self.0
                 .map_ok(|(stmt, conn)| (MaybeCached::CannotCache(stmt), conn))
                 .boxed(),
@@ -34,7 +35,7 @@ where
     }
 
     fn map_to_cache(stmt: &mut S, conn: C) -> Self::Return<'_> {
-        future::Either::Left(future::ready(Ok((MaybeCached::Cached(stmt), conn))))
+        Either::Left(future::ready(Ok((MaybeCached::Cached(stmt), conn))))
     }
 
     fn register_cache<'a>(
@@ -44,7 +45,7 @@ where
     where
         Self: 'a,
     {
-        future::Either::Right(
+        Either::Right(
             self.0
                 .map_ok(|(stmt, conn)| (MaybeCached::Cached(callback(stmt)), conn))
                 .boxed(),

@@ -399,7 +399,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// assert_eq!(vec!["Sean", "Tess"], data);
@@ -428,7 +428,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![
@@ -468,7 +468,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![

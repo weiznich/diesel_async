@@ -324,7 +324,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
                 .map_err(|_| diesel::result::Error::RollbackTransaction)
                 .and_then(move |r| {
                     let _ = user_result_tx.send(r);
-                    futures_util::future::ready(Err(diesel::result::Error::RollbackTransaction))
+                    std::future::ready(Err(diesel::result::Error::RollbackTransaction))
                 })
                 .scope_boxed()
         })
@@ -332,7 +332,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
             let r = user_result_rx
                 .try_recv()
                 .expect("Transaction did not succeed");
-            futures_util::future::ready(r)
+            std::future::ready(r)
         })
     }
 
