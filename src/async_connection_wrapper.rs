@@ -9,9 +9,9 @@
 //!   as replacement for the existing connection
 //!   implementations provided by diesel
 
-use futures_util::Future;
 use futures_util::Stream;
 use futures_util::StreamExt;
+use std::future::Future;
 use std::pin::Pin;
 
 /// This is a helper trait that allows to customize the

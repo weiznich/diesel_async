@@ -79,8 +79,9 @@ use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
 use futures_util::future::BoxFuture;
-use futures_util::{Future, FutureExt, Stream};
+use futures_util::{FutureExt, Stream};
 use std::fmt::Debug;
+use std::future::Future;
 
 pub use scoped_futures;
 use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
