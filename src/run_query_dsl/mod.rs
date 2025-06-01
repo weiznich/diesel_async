@@ -3,8 +3,9 @@ use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
-use futures_util::future::BoxFuture;
-use futures_util::{future, stream, FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures_core::future::BoxFuture;
+use futures_core::Stream;
+use futures_util::{future, stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -398,7 +399,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// assert_eq!(vec!["Sean", "Tess"], data);
@@ -427,7 +428,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![
@@ -467,7 +468,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ///     .await?
     ///     .try_fold(Vec::new(), |mut acc, item| {
     ///          acc.push(item);
-    ///          futures_util::future::ready(Ok(acc))
+    ///          std::future::ready(Ok(acc))
     ///      })
     ///     .await?;
     /// let expected_data = vec![

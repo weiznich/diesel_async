@@ -11,11 +11,13 @@ use diesel::query_builder::QueryBuilder;
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
 use diesel::QueryResult;
-use futures_util::future::BoxFuture;
-use futures_util::stream::{self, BoxStream};
-use futures_util::{Future, FutureExt, StreamExt, TryStreamExt};
+use futures_core::future::BoxFuture;
+use futures_core::stream::BoxStream;
+use futures_util::stream;
+use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Opts, OptsBuilder, Statement};
+use std::future::Future;
 
 mod error_helper;
 mod row;

@@ -10,8 +10,8 @@ use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
 use diesel::connection::{CacheSize, Instrumentation};
 use diesel::QueryResult;
-use futures_util::future::BoxFuture;
-use futures_util::{future, FutureExt};
+use futures_core::future::BoxFuture;
+use futures_util::FutureExt;
 use std::borrow::Cow;
 use std::fmt;
 use std::future::Future;
@@ -47,11 +47,10 @@ impl std::error::Error for PoolError {}
 
 /// Type of the custom setup closure passed to [`ManagerConfig::custom_setup`]
 pub type SetupCallback<C> =
-    Box<dyn Fn(&str) -> future::BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>;
+    Box<dyn Fn(&str) -> BoxFuture<diesel::ConnectionResult<C>> + Send + Sync>;
 
 /// Type of the recycle check callback for the [`RecyclingMethod::CustomFunction`] variant
-pub type RecycleCheckCallback<C> =
-    dyn Fn(&mut C) -> future::BoxFuture<QueryResult<()>> + Send + Sync;
+pub type RecycleCheckCallback<C> = dyn Fn(&mut C) -> BoxFuture<QueryResult<()>> + Send + Sync;
 
 /// Possible methods of how a connection is recycled.
 #[derive(Default)]

@@ -6,7 +6,7 @@
 //!
 //! * using a sync Connection implementation in async context
 //! * using the same code base for async crates needing multiple backends
-use futures_util::future::BoxFuture;
+use futures_core::future::BoxFuture;
 use std::error::Error;
 
 #[cfg(feature = "sqlite")]
@@ -100,7 +100,7 @@ mod implementation {
     };
     use diesel::row::IntoOwnedRow;
     use diesel::{ConnectionResult, QueryResult};
-    use futures_util::stream::BoxStream;
+    use futures_core::stream::BoxStream;
     use futures_util::{FutureExt, StreamExt, TryFutureExt};
     use std::marker::PhantomData;
     use std::sync::{Arc, Mutex};

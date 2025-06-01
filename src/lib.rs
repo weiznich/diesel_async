@@ -78,9 +78,11 @@ use diesel::connection::{CacheSize, Instrumentation};
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
-use futures_util::future::BoxFuture;
-use futures_util::{Future, FutureExt, Stream};
+use futures_core::future::BoxFuture;
+use futures_core::Stream;
+use futures_util::FutureExt;
 use std::fmt::Debug;
+use std::future::Future;
 
 pub use scoped_futures;
 use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
@@ -322,7 +324,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
                 .map_err(|_| diesel::result::Error::RollbackTransaction)
                 .and_then(move |r| {
                     let _ = user_result_tx.send(r);
-                    futures_util::future::ready(Err(diesel::result::Error::RollbackTransaction))
+                    std::future::ready(Err(diesel::result::Error::RollbackTransaction))
                 })
                 .scope_boxed()
         })
@@ -330,7 +332,7 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
             let r = user_result_rx
                 .try_recv()
                 .expect("Transaction did not succeed");
-            futures_util::future::ready(r)
+            std::future::ready(r)
         })
     }
 

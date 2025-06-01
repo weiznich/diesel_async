@@ -22,12 +22,14 @@ use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
 use diesel::result::{DatabaseErrorKind, Error};
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
-use futures_util::future::BoxFuture;
+use futures_core::future::BoxFuture;
+use futures_core::stream::BoxStream;
 use futures_util::future::Either;
-use futures_util::stream::{BoxStream, TryStreamExt};
+use futures_util::stream::TryStreamExt;
 use futures_util::TryFutureExt;
-use futures_util::{Future, FutureExt, StreamExt};
+use futures_util::{FutureExt, StreamExt};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
@@ -443,10 +445,11 @@ impl AsyncPgConnection {
     async fn set_config_options(&mut self) -> QueryResult<()> {
         use crate::run_query_dsl::RunQueryDsl;
 
-        futures_util::try_join!(
+        futures_util::future::try_join(
             diesel::sql_query("SET TIME ZONE 'UTC'").execute(self),
             diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'").execute(self),
-        )?;
+        )
+        .await?;
         Ok(())
     }
 
