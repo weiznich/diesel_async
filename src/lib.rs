@@ -19,7 +19,7 @@
 //!
 //! * [`AsyncMysqlConnection`] (enabled by the `mysql` feature)
 //! * [`AsyncPgConnection`] (enabled by the `postgres` feature)
-//! * [`SyncConnectionWrapper`] (enabled by the `sync-connection-wrapper`/`sqlite` feature)
+//! * [`SyncConnectionWrapper`](sync_connection_wrapper::SyncConnectionWrapper) (enabled by the `sync-connection-wrapper`/`sqlite` feature)
 //!
 //! Ordinary usage of `diesel-async` assumes that you just replace the corresponding sync trait
 //! method calls and connections with their async counterparts.
