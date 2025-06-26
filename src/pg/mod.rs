@@ -146,7 +146,12 @@ impl SimpleAsyncConnection for AsyncPgConnection {
             .batch_execute(query)
             .map_err(ErrorHelper)
             .map_err(Into::into);
+
         let r = drive_future(connection_future, batch_execute).await;
+        let r = {
+            let mut transaction_manager = self.transaction_state.lock().await;
+            update_transaction_manager_status(r, &mut transaction_manager)
+        };
         self.record_instrumentation(InstrumentationEvent::finish_query(
             &StrQueryHelper::new(query),
             r.as_ref().err(),
@@ -379,7 +384,7 @@ impl AsyncPgConnection {
     ///     .await
     /// # }
     /// ```
-    pub fn build_transaction(&mut self) -> TransactionBuilder<Self> {
+    pub fn build_transaction(&mut self) -> TransactionBuilder<'_, Self> {
         TransactionBuilder::new(self)
     }
 

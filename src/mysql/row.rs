@@ -121,7 +121,7 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
         Some(field)
     }
 
-    fn partial_row(&self, range: std::ops::Range<usize>) -> PartialRow<Self::InnerPartialRow> {
+    fn partial_row(&self, range: std::ops::Range<usize>) -> PartialRow<'_, Self::InnerPartialRow> {
         PartialRow::new(self, range)
     }
 }

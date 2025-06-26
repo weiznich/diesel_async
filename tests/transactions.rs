@@ -1,0 +1,106 @@
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn concurrent_serializable_transactions_behave_correctly() {
+    use diesel::prelude::*;
+    use diesel_async::RunQueryDsl;
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
+
+    table! {
+        users3 {
+            id -> Integer,
+        }
+    }
+
+    // create an async connection
+    let mut conn = super::connection_without_transaction().await;
+
+    let mut conn1 = super::connection_without_transaction().await;
+
+    diesel::sql_query("CREATE TABLE IF NOT EXISTS users3 (id int);")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    let barrier_1 = Arc::new(Barrier::new(2));
+    let barrier_2 = Arc::new(Barrier::new(2));
+    let barrier_1_for_tx1 = barrier_1.clone();
+    let barrier_1_for_tx2 = barrier_1.clone();
+    let barrier_2_for_tx1 = barrier_2.clone();
+    let barrier_2_for_tx2 = barrier_2.clone();
+
+    let mut tx = conn.build_transaction().serializable().read_write();
+
+    let res = tx.run(|conn| {
+        Box::pin(async {
+            users3::table.select(users3::id).load::<i32>(conn).await?;
+
+            barrier_1_for_tx1.wait().await;
+            diesel::insert_into(users3::table)
+                .values(users3::id.eq(1))
+                .execute(conn)
+                .await?;
+            barrier_2_for_tx1.wait().await;
+
+            Ok::<_, diesel::result::Error>(())
+        })
+    });
+
+    let mut tx1 = conn1.build_transaction().serializable().read_write();
+
+    let res1 = async {
+        let res = tx1
+            .run(|conn| {
+                Box::pin(async {
+                    users3::table.select(users3::id).load::<i32>(conn).await?;
+
+                    barrier_1_for_tx2.wait().await;
+                    diesel::insert_into(users3::table)
+                        .values(users3::id.eq(1))
+                        .execute(conn)
+                        .await?;
+
+                    Ok::<_, diesel::result::Error>(())
+                })
+            })
+            .await;
+        barrier_2_for_tx2.wait().await;
+        res
+    };
+
+    let (res, res1) = tokio::join!(res, res1);
+    let _ = diesel::sql_query("DROP TABLE users3")
+        .execute(&mut conn1)
+        .await;
+
+    assert!(
+        res1.is_ok(),
+        "Expected the second transaction to be succussfull, but got an error: {:?}",
+        res1.unwrap_err()
+    );
+
+    assert!(res.is_err(), "Expected the first transaction to fail");
+    let err = res.unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            diesel::result::Error::DatabaseError(
+                diesel::result::DatabaseErrorKind::SerializationFailure,
+                _
+            )
+        ),
+        "Expected an serialization failure but got another error: {err:?}"
+    );
+
+    let mut tx = conn.build_transaction();
+
+    let res = tx
+        .run(|_| Box::pin(async { Ok::<_, diesel::result::Error>(()) }))
+        .await;
+
+    assert!(
+        res.is_ok(),
+        "Expect transaction to run fine but got an error: {:?}",
+        res.unwrap_err()
+    );
+}

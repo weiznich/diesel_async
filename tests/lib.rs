@@ -11,6 +11,7 @@ mod instrumentation;
 mod pooling;
 #[cfg(feature = "async-connection-wrapper")]
 mod sync_wrapper;
+mod transactions;
 mod type_check;
 
 async fn transaction_test<C: AsyncConnection<Backend = TestBackend>>(
