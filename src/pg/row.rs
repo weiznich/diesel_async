@@ -41,7 +41,7 @@ impl<'a> diesel::row::Row<'a, diesel::pg::Pg> for PgRow {
     fn partial_row(
         &self,
         range: std::ops::Range<usize>,
-    ) -> diesel::row::PartialRow<Self::InnerPartialRow> {
+    ) -> diesel::row::PartialRow<'_, Self::InnerPartialRow> {
         PartialRow::new(self, range)
     }
 }

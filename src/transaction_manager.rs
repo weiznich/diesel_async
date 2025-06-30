@@ -381,12 +381,8 @@ where
                     ..
                 }) = conn.transaction_state().status
                 {
-                    match Self::critical_transaction_block(
-                        &is_broken,
-                        Self::rollback_transaction(conn),
-                    )
-                    .await
-                    {
+                    // rollback_transaction handles the critical block internally on its own
+                    match Self::rollback_transaction(conn).await {
                         Ok(()) => {}
                         Err(rollback_error) => {
                             conn.transaction_state().status.set_in_error();
