@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-diesel-async = { version = "0.5.0", path = "../../../", features = ["bb8", "postgres", "async-connection-wrapper"] }
+diesel-async = { version = "0.6.0", path = "../../../", features = ["bb8", "postgres", "async-connection-wrapper"] }
 futures-util = "0.3.21"
 rustls = "0.23.8"
 rustls-platform-verifier = "0.5.0"
@@ -17,10 +17,6 @@ tokio-postgres-rustls = "0.13.0"
 [dependencies.diesel]
 version = "2.2.0"
 default-features = false
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
 
 [dependencies.diesel_migrations]
 version = "2.2.0"
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"

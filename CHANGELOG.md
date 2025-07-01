@@ -4,7 +4,14 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
-## [Unreleased]
+## [Unreleased
+
+## [0.6.0] - 2025-07-02
+
+* Allow to control the statement cache size
+* Minimize dependencies features 
+* Bump minimal supported mysql_async version to 0.36.0
+* Fixing a bug in how we tracked open transaction that could lead to dangling transactions is specific cases
 
 ## [0.5.2] - 2024-11-26
 

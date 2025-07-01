@@ -112,9 +112,10 @@ use diesel::query_builder::*;
 use diesel::result::QueryResult;
 
 /// Set cache size for a connection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum CacheSize {
+    #[default]
     /// Caches all queries if possible
     Unbounded,
     /// Disable statement cache
