@@ -1,4 +1,4 @@
-use diesel::connection::statement_cache::{MaybeCached, StatementCallbackReturnType};
+use crate::statement_cache::{MaybeCached, StatementCallbackReturnType};
 use diesel::QueryResult;
 use futures_core::future::BoxFuture;
 use futures_util::future::Either;

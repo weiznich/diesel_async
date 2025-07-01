@@ -43,8 +43,6 @@ default-features = false
 features = [
   "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ]
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
 
 [dev-dependencies]
 tokio = { version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"] }
@@ -58,13 +56,9 @@ default-features = false
 features = [
   "chrono"
 ]
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
 
 [dev-dependencies.diesel_migrations]
 version = "2.2.0"
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
 
 [features]
 default = []

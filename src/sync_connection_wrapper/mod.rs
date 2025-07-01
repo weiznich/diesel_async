@@ -89,9 +89,10 @@ pub use self::implementation::SyncConnectionWrapper;
 pub use self::implementation::SyncTransactionManagerWrapper;
 
 mod implementation {
+    use crate::statement_cache::CacheSize;
     use crate::{AsyncConnection, SimpleAsyncConnection, TransactionManager};
     use diesel::backend::{Backend, DieselReserveSpecialization};
-    use diesel::connection::{CacheSize, Instrumentation};
+    use diesel::connection::Instrumentation;
     use diesel::connection::{
         Connection, LoadConnection, TransactionManagerStatus, WithMetadataLookup,
     };
@@ -245,18 +246,19 @@ mod implementation {
             }
         }
 
-        fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
-            // there should be no other pending future when this is called
-            // that means there is only one instance of this arc and
-            // we can simply access the inner data
-            if let Some(inner) = Arc::get_mut(&mut self.inner) {
-                inner
-                    .get_mut()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .set_prepared_statement_cache_size(size)
-            } else {
-                panic!("Cannot access shared cache")
-            }
+        fn set_prepared_statement_cache_size(&mut self, _size: CacheSize) {
+            // TODO: fix this as soon as there is a diesel version supporting this
+            // // there should be no other pending future when this is called
+            // // that means there is only one instance of this arc and
+            // // we can simply access the inner data
+            // if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            //     inner
+            //         .get_mut()
+            //         .unwrap_or_else(|p| p.into_inner())
+            //         .set_prepared_statement_cache_size(size)
+            // } else {
+            //     panic!("Cannot access shared cache")
+            // }
         }
     }
 

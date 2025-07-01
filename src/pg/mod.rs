@@ -7,14 +7,13 @@
 use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
+use crate::statement_cache::CacheSize;
+use crate::statement_cache::{PrepareForCache, QueryFragmentForCachedStatement, StatementCache};
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
 use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
-use diesel::connection::statement_cache::{
-    PrepareForCache, QueryFragmentForCachedStatement, StatementCache,
-};
+use diesel::connection::Instrumentation;
+use diesel::connection::InstrumentationEvent;
 use diesel::connection::StrQueryHelper;
-use diesel::connection::{CacheSize, Instrumentation};
-use diesel::connection::{DynInstrumentation, InstrumentationEvent};
 use diesel::pg::{
     Pg, PgMetadataCache, PgMetadataCacheKey, PgMetadataLookup, PgQueryBuilder, PgTypeMetadata,
 };
@@ -132,7 +131,7 @@ pub struct AsyncPgConnection {
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
     // a sync mutex is fine here as we only hold it for a really short time
-    instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
+    instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
 }
 
 impl SimpleAsyncConnection for AsyncPgConnection {
@@ -169,7 +168,7 @@ impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
-        let mut instrumentation = DynInstrumentation::default_instrumentation();
+        let mut instrumentation = diesel::connection::get_default_instrumentation();
         instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
             database_url,
         ));
@@ -236,14 +235,14 @@ impl AsyncConnection for AsyncPgConnection {
         // that means there is only one instance of this arc and
         // we can simply access the inner data
         if let Some(instrumentation) = Arc::get_mut(&mut self.instrumentation) {
-            &mut **(instrumentation.get_mut().unwrap_or_else(|p| p.into_inner()))
+            &mut *(instrumentation.get_mut().unwrap_or_else(|p| p.into_inner()))
         } else {
             panic!("Cannot access shared instrumentation")
         }
     }
 
     fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
-        self.instrumentation = Arc::new(std::sync::Mutex::new(instrumentation.into()));
+        self.instrumentation = Arc::new(std::sync::Mutex::new(Some(Box::new(instrumentation))));
     }
 
     fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
@@ -395,7 +394,7 @@ impl AsyncPgConnection {
             None,
             None,
             Arc::new(std::sync::Mutex::new(
-                DynInstrumentation::default_instrumentation(),
+                diesel::connection::get_default_instrumentation(),
             )),
         )
         .await
@@ -416,7 +415,9 @@ impl AsyncPgConnection {
             client,
             Some(error_rx),
             Some(shutdown_tx),
-            Arc::new(std::sync::Mutex::new(DynInstrumentation::none())),
+            Arc::new(std::sync::Mutex::new(
+                diesel::connection::get_default_instrumentation(),
+            )),
         )
         .await
     }
@@ -425,7 +426,7 @@ impl AsyncPgConnection {
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
-        instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
+        instrumentation: Arc<std::sync::Mutex<Option<Box<dyn Instrumentation>>>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
             conn: Arc::new(conn),

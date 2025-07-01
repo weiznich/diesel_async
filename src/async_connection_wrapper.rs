@@ -100,7 +100,7 @@ pub type AsyncConnectionWrapper<C, B = self::implementation::Tokio> =
 pub use self::implementation::AsyncConnectionWrapper;
 
 mod implementation {
-    use diesel::connection::{CacheSize, Instrumentation, SimpleConnection};
+    use diesel::connection::{Instrumentation, SimpleConnection};
     use std::ops::{Deref, DerefMut};
 
     use super::*;
@@ -186,10 +186,6 @@ mod implementation {
 
         fn set_instrumentation(&mut self, instrumentation: impl Instrumentation) {
             self.inner.set_instrumentation(instrumentation);
-        }
-
-        fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
-            self.inner.set_prepared_statement_cache_size(size)
         }
     }
 

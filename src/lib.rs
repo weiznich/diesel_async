@@ -72,9 +72,8 @@
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-
 use diesel::backend::Backend;
-use diesel::connection::{CacheSize, Instrumentation};
+use diesel::connection::Instrumentation;
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
 use diesel::{ConnectionResult, QueryResult};
@@ -96,6 +95,7 @@ pub mod pg;
 #[cfg(feature = "pool")]
 pub mod pooled_connection;
 mod run_query_dsl;
+mod statement_cache;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 mod stmt_cache;
 #[cfg(feature = "sync-connection-wrapper")]
@@ -111,6 +111,8 @@ pub use self::pg::AsyncPgConnection;
 #[doc(inline)]
 pub use self::run_query_dsl::*;
 
+#[doc(inline)]
+pub use self::statement_cache::CacheSize;
 #[doc(inline)]
 pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 

@@ -5,10 +5,11 @@
 //! * [deadpool](self::deadpool)
 //! * [bb8](self::bb8)
 //! * [mobc](self::mobc)
+use crate::statement_cache::CacheSize;
 use crate::{AsyncConnection, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
-use diesel::connection::{CacheSize, Instrumentation};
+use diesel::connection::Instrumentation;
 use diesel::QueryResult;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
