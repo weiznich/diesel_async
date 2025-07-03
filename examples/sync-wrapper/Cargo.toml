@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-diesel-async = { version = "0.5.0", path = "../../", features = ["sync-connection-wrapper", "async-connection-wrapper"] }
+diesel-async = { version = "0.6.0", path = "../../", features = ["sync-connection-wrapper", "async-connection-wrapper"] }
 futures-util = "0.3.21"
 tokio = { version = "1.2.0", default-features = false, features = ["macros", "rt-multi-thread"] }
 
