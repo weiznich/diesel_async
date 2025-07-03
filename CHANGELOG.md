@@ -6,6 +6,10 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-07-03
+
+* Fix features for some dependencies
+
 ## [0.6.0] - 2025-07-02
 
 * Allow to control the statement cache size
@@ -96,4 +100,5 @@ in the pool should be checked if they are still valid
 [0.5.1]: https://github.com/weiznich/diesel_async/compare/v0.5.0...v0.5.1
 [0.5.2]: https://github.com/weiznich/diesel_async/compare/v0.5.1...v0.5.2
 [0.6.0]: https://github.com/weiznich/diesel_async/compare/v0.5.2...v0.6.0
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.5.0...main
+[0.6.1]: https://github.com/weiznich/diesel_async/compare/v0.6.0...v0.6.1
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.6.1...main
