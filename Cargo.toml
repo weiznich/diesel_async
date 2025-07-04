@@ -1,6 +1,6 @@
 [package]
 name = "diesel-async"
-version = "0.5.2"
+version = "0.6.1"
 authors = ["Georg Semmler <github@weiznich.de>"]
 edition = "2021"
 autotests = false
@@ -78,11 +78,11 @@ mysql = [
 postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
 sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
 sync-connection-wrapper = ["tokio/rt"]
-async-connection-wrapper = ["tokio/net"]
+async-connection-wrapper = ["tokio/net", "tokio/rt"]
 pool = []
 r2d2 = ["pool", "diesel/r2d2"]
-bb8 = ["pool", "dep:bb8", "dep:async-trait"]
-mobc = ["pool", "dep:mobc"]
+bb8 = ["pool", "dep:bb8"]
+mobc = ["pool", "dep:mobc", "dep:async-trait", "tokio/sync"]
 deadpool = ["pool", "dep:deadpool"]
 
 [[test]]

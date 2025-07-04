@@ -246,3 +246,12 @@ jobs:
         # cannot test sqlite yet as that crate
         # as broken min-version dependencies as well
         run: cargo +1.84.0 minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
+  all_features_build:
+    name: Check all feature combination build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - name: Check feature combinations
+        run: cargo hack check --feature-powerset --no-dev-deps --depth 2
