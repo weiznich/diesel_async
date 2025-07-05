@@ -5,7 +5,7 @@
 //! * [deadpool](self::deadpool)
 //! * [bb8](self::bb8)
 //! * [mobc](self::mobc)
-use crate::{AsyncConnection, SimpleAsyncConnection};
+use crate::{AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use crate::{TransactionManager, UpdateAndFetchResults};
 use diesel::associations::HasTable;
 use diesel::connection::{CacheSize, Instrumentation};
@@ -176,27 +176,18 @@ where
     }
 }
 
-impl<C> AsyncConnection for C
+impl<C> AsyncConnectionCore for C
 where
     C: DerefMut + Send,
-    C::Target: AsyncConnection,
+    C::Target: AsyncConnectionCore,
 {
     type ExecuteFuture<'conn, 'query> =
-        <C::Target as AsyncConnection>::ExecuteFuture<'conn, 'query>;
-    type LoadFuture<'conn, 'query> = <C::Target as AsyncConnection>::LoadFuture<'conn, 'query>;
-    type Stream<'conn, 'query> = <C::Target as AsyncConnection>::Stream<'conn, 'query>;
-    type Row<'conn, 'query> = <C::Target as AsyncConnection>::Row<'conn, 'query>;
+        <C::Target as AsyncConnectionCore>::ExecuteFuture<'conn, 'query>;
+    type LoadFuture<'conn, 'query> = <C::Target as AsyncConnectionCore>::LoadFuture<'conn, 'query>;
+    type Stream<'conn, 'query> = <C::Target as AsyncConnectionCore>::Stream<'conn, 'query>;
+    type Row<'conn, 'query> = <C::Target as AsyncConnectionCore>::Row<'conn, 'query>;
 
-    type Backend = <C::Target as AsyncConnection>::Backend;
-
-    type TransactionManager =
-        PoolTransactionManager<<C::Target as AsyncConnection>::TransactionManager>;
-
-    async fn establish(_database_url: &str) -> diesel::ConnectionResult<Self> {
-        Err(diesel::result::ConnectionError::BadConnection(
-            String::from("Cannot directly establish a pooled connection"),
-        ))
-    }
+    type Backend = <C::Target as AsyncConnectionCore>::Backend;
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
@@ -220,6 +211,21 @@ where
     {
         let conn = self.deref_mut();
         conn.execute_returning_count(source)
+    }
+}
+
+impl<C> AsyncConnection for C
+where
+    C: DerefMut + Send,
+    C::Target: AsyncConnection,
+{
+    type TransactionManager =
+        PoolTransactionManager<<C::Target as AsyncConnection>::TransactionManager>;
+
+    async fn establish(_database_url: &str) -> diesel::ConnectionResult<Self> {
+        Err(diesel::result::ConnectionError::BadConnection(
+            String::from("Cannot directly establish a pooled connection"),
+        ))
     }
 
     fn transaction_state(

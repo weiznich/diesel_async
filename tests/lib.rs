@@ -100,7 +100,7 @@ type TestConnection =
     sync_connection_wrapper::SyncConnectionWrapper<diesel::sqlite::SqliteConnection>;
 
 #[allow(dead_code)]
-type TestBackend = <TestConnection as AsyncConnection>::Backend;
+type TestBackend = <TestConnection as AsyncConnectionCore>::Backend;
 
 #[tokio::test]
 async fn test_basic_insert_and_load() -> QueryResult<()> {

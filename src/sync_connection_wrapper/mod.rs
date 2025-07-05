@@ -89,7 +89,7 @@ pub use self::implementation::SyncConnectionWrapper;
 pub use self::implementation::SyncTransactionManagerWrapper;
 
 mod implementation {
-    use crate::{AsyncConnection, SimpleAsyncConnection, TransactionManager};
+    use crate::{AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection, TransactionManager};
     use diesel::backend::{Backend, DieselReserveSpecialization};
     use diesel::connection::{CacheSize, Instrumentation};
     use diesel::connection::{
@@ -133,7 +133,7 @@ mod implementation {
         }
     }
 
-    impl<C, S, MD, O> AsyncConnection for SyncConnectionWrapper<C, S>
+    impl<C, S, MD, O> AsyncConnectionCore for SyncConnectionWrapper<C, S>
     where
         // Backend bounds
         <C as Connection>::Backend: std::default::Default + DieselReserveSpecialization,
@@ -158,19 +158,6 @@ mod implementation {
         type Stream<'conn, 'query> = BoxStream<'static, QueryResult<Self::Row<'conn, 'query>>>;
         type Row<'conn, 'query> = O;
         type Backend = <C as Connection>::Backend;
-        type TransactionManager =
-            SyncTransactionManagerWrapper<<C as Connection>::TransactionManager>;
-
-        async fn establish(database_url: &str) -> ConnectionResult<Self> {
-            let database_url = database_url.to_string();
-            let mut runtime = S::get_runtime();
-
-            runtime
-                .spawn_blocking(move || C::establish(&database_url))
-                .await
-                .unwrap_or_else(|e| Err(diesel::ConnectionError::BadConnection(e.to_string())))
-                .map(move |c| SyncConnectionWrapper::with_runtime(c, runtime))
-        }
 
         fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
         where
@@ -208,6 +195,40 @@ mod implementation {
             self.execute_with_prepared_query(source, |conn, query| {
                 conn.execute_returning_count(&query)
             })
+        }
+    }
+
+    impl<C, S, MD, O> AsyncConnection for SyncConnectionWrapper<C, S>
+    where
+        // Backend bounds
+        <C as Connection>::Backend: std::default::Default + DieselReserveSpecialization,
+        <C::Backend as Backend>::QueryBuilder: std::default::Default,
+        // Connection bounds
+        C: Connection + LoadConnection + WithMetadataLookup + 'static,
+        <C as Connection>::TransactionManager: Send,
+        // BindCollector bounds
+        MD: Send + 'static,
+        for<'a> <C::Backend as Backend>::BindCollector<'a>:
+            MoveableBindCollector<C::Backend, BindData = MD> + std::default::Default,
+        // Row bounds
+        O: 'static + Send + for<'conn> diesel::row::Row<'conn, C::Backend>,
+        for<'conn, 'query> <C as LoadConnection>::Row<'conn, 'query>:
+            IntoOwnedRow<'conn, <C as Connection>::Backend, OwnedRow = O>,
+        // SpawnBlocking bounds
+        S: SpawnBlocking + Send,
+    {
+        type TransactionManager =
+            SyncTransactionManagerWrapper<<C as Connection>::TransactionManager>;
+
+        async fn establish(database_url: &str) -> ConnectionResult<Self> {
+            let database_url = database_url.to_string();
+            let mut runtime = S::get_runtime();
+
+            runtime
+                .spawn_blocking(move || C::establish(&database_url))
+                .await
+                .unwrap_or_else(|e| Err(diesel::ConnectionError::BadConnection(e.to_string())))
+                .map(move |c| SyncConnectionWrapper::with_runtime(c, runtime))
         }
 
         fn transaction_state(
