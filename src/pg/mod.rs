@@ -114,6 +114,48 @@ const FAKE_OID: u32 = 0;
 /// # }
 /// ```
 ///
+/// For more complex cases, an immutable reference to the connection need to be used:
+/// ```rust
+/// # include!("../doctest_setup.rs");
+/// use diesel_async::RunQueryDsl;
+///
+/// #
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// #     run_test().await.unwrap();
+/// # }
+/// #
+/// # async fn run_test() -> QueryResult<()> {
+/// #     use diesel::sql_types::{Text, Integer};
+/// #     let conn = &mut establish_connection().await;
+/// #
+///       async fn fn12(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+///           let f1 = diesel::select(1_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+///           let f2 = diesel::select(2_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+///
+///           futures_util::try_join!(f1, f2)
+///       }
+///
+///       async fn fn34(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+///           let f3 = diesel::select(3_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+///           let f4 = diesel::select(4_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+///
+///           futures_util::try_join!(f3, f4)
+///       }
+///
+///       let f12 = fn12(&conn);
+///       let f34 = fn34(&conn);
+///
+///       let ((r1, r2), (r3, r4)) = futures_util::try_join!(f12, f34).unwrap();
+///
+///       assert_eq!(r1, 1);
+///       assert_eq!(r2, 2);
+///       assert_eq!(r3, 3);
+///       assert_eq!(r4, 4);
+///       # Ok(())
+/// # }
+/// ```
+///
 /// ## TLS
 ///
 /// Connections created by [`AsyncPgConnection::establish`] do not support TLS.
@@ -136,6 +178,12 @@ pub struct AsyncPgConnection {
 }
 
 impl SimpleAsyncConnection for AsyncPgConnection {
+    async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
+        SimpleAsyncConnection::batch_execute(&mut &*self, query).await
+    }
+}
+
+impl SimpleAsyncConnection for &AsyncPgConnection {
     async fn batch_execute(&mut self, query: &str) -> QueryResult<()> {
         self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
             query,
@@ -166,6 +214,38 @@ impl AsyncConnectionCore for AsyncPgConnection {
     type Stream<'conn, 'query> = BoxStream<'static, QueryResult<PgRow>>;
     type Row<'conn, 'query> = PgRow;
     type Backend = diesel::pg::Pg;
+
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
+    where
+        T: AsQuery + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
+    {
+        AsyncConnectionCore::load(&mut &*self, source)
+    }
+
+    fn execute_returning_count<'conn, 'query, T>(
+        &'conn mut self,
+        source: T,
+    ) -> Self::ExecuteFuture<'conn, 'query>
+    where
+        T: QueryFragment<Self::Backend> + QueryId + 'query,
+    {
+        AsyncConnectionCore::execute_returning_count(&mut &*self, source)
+    }
+}
+
+impl AsyncConnectionCore for &AsyncPgConnection {
+    type LoadFuture<'conn, 'query> =
+        <AsyncPgConnection as AsyncConnectionCore>::LoadFuture<'conn, 'query>;
+
+    type ExecuteFuture<'conn, 'query> =
+        <AsyncPgConnection as AsyncConnectionCore>::ExecuteFuture<'conn, 'query>;
+
+    type Stream<'conn, 'query> = <AsyncPgConnection as AsyncConnectionCore>::Stream<'conn, 'query>;
+
+    type Row<'conn, 'query> = <AsyncPgConnection as AsyncConnectionCore>::Row<'conn, 'query>;
+
+    type Backend = <AsyncPgConnection as AsyncConnectionCore>::Backend;
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
@@ -942,11 +1022,15 @@ mod tests {
     use crate::run_query_dsl::RunQueryDsl;
     use diesel::sql_types::Integer;
     use diesel::IntoSql;
+    use futures_util::future::try_join;
+    use futures_util::try_join;
+    use scoped_futures::ScopedFutureExt;
 
     #[tokio::test]
     async fn pipelining() {
         let database_url =
             std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
+
         let mut conn = crate::AsyncPgConnection::establish(&database_url)
             .await
             .unwrap();
@@ -957,9 +1041,100 @@ mod tests {
         let f1 = q1.get_result::<i32>(&mut conn);
         let f2 = q2.get_result::<i32>(&mut conn);
 
-        let (r1, r2) = futures_util::try_join!(f1, f2).unwrap();
+        let (r1, r2) = try_join!(f1, f2).unwrap();
 
         assert_eq!(r1, 1);
         assert_eq!(r2, 2);
+    }
+
+    #[tokio::test]
+    async fn pipelining_with_composed_futures() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
+
+        let conn = crate::AsyncPgConnection::establish(&database_url)
+            .await
+            .unwrap();
+
+        async fn fn12(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+            let f1 = diesel::select(1_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f2 = diesel::select(2_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+
+            try_join!(f1, f2)
+        }
+
+        async fn fn34(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+            let f3 = diesel::select(3_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f4 = diesel::select(4_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+
+            try_join!(f3, f4)
+        }
+
+        let f12 = fn12(&conn);
+        let f34 = fn34(&conn);
+
+        let ((r1, r2), (r3, r4)) = try_join!(f12, f34).unwrap();
+
+        assert_eq!(r1, 1);
+        assert_eq!(r2, 2);
+        assert_eq!(r3, 3);
+        assert_eq!(r4, 4);
+    }
+
+    #[tokio::test]
+    async fn pipelining_with_composed_futures_and_transaction() {
+        let database_url =
+            std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
+
+        let mut conn = crate::AsyncPgConnection::establish(&database_url)
+            .await
+            .unwrap();
+
+        fn erase<'a, T: Future + Send + 'a>(t: T) -> impl Future<Output = T::Output> + Send + 'a {
+            t
+        }
+
+        async fn fn12(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+            let f1 = diesel::select(1_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f2 = diesel::select(2_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+
+            erase(try_join(f1, f2)).await
+        }
+
+        async fn fn34(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+            let f3 = diesel::select(3_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f4 = diesel::select(4_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+
+            try_join(f3, f4).boxed().await
+        }
+
+        async fn fn56(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+            let f5 = diesel::select(5_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f6 = diesel::select(6_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+
+            try_join!(f5.boxed(), f6.boxed())
+        }
+
+        conn.transaction(|conn| {
+            async move {
+                let f12 = fn12(conn);
+                let f34 = fn34(conn);
+                let f56 = fn56(conn);
+
+                let ((r1, r2), (r3, r4), (r5, r6)) = try_join!(f12, f34, f56).unwrap();
+
+                assert_eq!(r1, 1);
+                assert_eq!(r2, 2);
+                assert_eq!(r3, 3);
+                assert_eq!(r4, 4);
+                assert_eq!(r5, 5);
+                assert_eq!(r6, 6);
+
+                QueryResult::<_>::Ok(())
+            }
+            .scope_boxed()
+        })
+        .await
+        .unwrap();
     }
 }
