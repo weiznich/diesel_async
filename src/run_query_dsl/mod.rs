@@ -1,4 +1,4 @@
-use crate::AsyncConnection;
+use crate::AsyncConnectionCore;
 use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
@@ -31,9 +31,9 @@ pub mod methods {
     /// to call `execute` from generic code.
     ///
     /// [`RunQueryDsl`]: super::RunQueryDsl
-    pub trait ExecuteDsl<Conn, DB = <Conn as AsyncConnection>::Backend>
+    pub trait ExecuteDsl<Conn, DB = <Conn as AsyncConnectionCore>::Backend>
     where
-        Conn: AsyncConnection<Backend = DB>,
+        Conn: AsyncConnectionCore<Backend = DB>,
         DB: Backend,
     {
         /// Execute this command
@@ -47,7 +47,7 @@ pub mod methods {
 
     impl<Conn, DB, T> ExecuteDsl<Conn, DB> for T
     where
-        Conn: AsyncConnection<Backend = DB>,
+        Conn: AsyncConnectionCore<Backend = DB>,
         DB: Backend,
         T: QueryFragment<DB> + QueryId + Send,
     {
@@ -69,7 +69,7 @@ pub mod methods {
     /// to call `load` from generic code.
     ///
     /// [`RunQueryDsl`]: super::RunQueryDsl
-    pub trait LoadQuery<'query, Conn: AsyncConnection, U> {
+    pub trait LoadQuery<'query, Conn: AsyncConnectionCore, U> {
         /// The future returned by [`LoadQuery::internal_load`]
         type LoadFuture<'conn>: Future<Output = QueryResult<Self::Stream<'conn>>> + Send
         where
@@ -85,7 +85,7 @@ pub mod methods {
 
     impl<'query, Conn, DB, T, U, ST> LoadQuery<'query, Conn, U> for T
     where
-        Conn: AsyncConnection<Backend = DB>,
+        Conn: AsyncConnectionCore<Backend = DB>,
         U: Send,
         DB: Backend + 'static,
         T: AsQuery + Send + 'query,
@@ -227,7 +227,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```
     fn execute<'conn, 'query>(self, conn: &'conn mut Conn) -> Conn::ExecuteFuture<'conn, 'query>
     where
-        Conn: AsyncConnection + Send,
+        Conn: AsyncConnectionCore + Send,
         Self: methods::ExecuteDsl<Conn> + 'query,
     {
         methods::ExecuteDsl::execute(self, conn)
@@ -343,7 +343,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ) -> return_futures::LoadFuture<'conn, 'query, Self, Conn, U>
     where
         U: Send,
-        Conn: AsyncConnection,
+        Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
         fn collect_result<U, S>(stream: S) -> stream::TryCollect<S, Vec<U>>
@@ -481,7 +481,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     /// ```
     fn load_stream<'conn, 'query, U>(self, conn: &'conn mut Conn) -> Self::LoadFuture<'conn>
     where
-        Conn: AsyncConnection,
+        Conn: AsyncConnectionCore,
         U: 'conn,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
@@ -544,7 +544,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ) -> return_futures::GetResult<'conn, 'query, Self, Conn, U>
     where
         U: Send + 'conn,
-        Conn: AsyncConnection,
+        Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
         #[allow(clippy::type_complexity)]
@@ -584,7 +584,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ) -> return_futures::LoadFuture<'conn, 'query, Self, Conn, U>
     where
         U: Send,
-        Conn: AsyncConnection,
+        Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
         self.load(conn)
@@ -640,7 +640,7 @@ pub trait RunQueryDsl<Conn>: Sized {
     ) -> return_futures::GetResult<'conn, 'query, diesel::dsl::Limit<Self>, Conn, U>
     where
         U: Send + 'conn,
-        Conn: AsyncConnection,
+        Conn: AsyncConnectionCore,
         Self: diesel::query_dsl::methods::LimitDsl,
         diesel::dsl::Limit<Self>: methods::LoadQuery<'query, Conn, U> + Send + 'query,
     {
@@ -734,7 +734,7 @@ impl<T, Conn> SaveChangesDsl<Conn> for T where
 /// For implementing this trait for a custom backend:
 /// * The `Changes` generic parameter represents the changeset that should be stored
 /// * The `Output` generic parameter represents the type of the response.
-pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnection
+pub trait UpdateAndFetchResults<Changes, Output>: AsyncConnectionCore
 where
     Changes: diesel::prelude::Identifiable + HasTable,
 {

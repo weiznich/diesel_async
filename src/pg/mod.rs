@@ -8,7 +8,7 @@ use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
-use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
+use crate::{AnsiTransactionManager, AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{
     PrepareForCache, QueryFragmentForCachedStatement, StatementCache,
 };
@@ -160,12 +160,37 @@ impl SimpleAsyncConnection for AsyncPgConnection {
     }
 }
 
-impl AsyncConnection for AsyncPgConnection {
+impl AsyncConnectionCore for AsyncPgConnection {
     type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
     type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
     type Stream<'conn, 'query> = BoxStream<'static, QueryResult<PgRow>>;
     type Row<'conn, 'query> = PgRow;
     type Backend = diesel::pg::Pg;
+
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
+    where
+        T: AsQuery + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
+    {
+        let query = source.as_query();
+        let load_future = self.with_prepared_statement(query, load_prepared);
+
+        self.run_with_connection_future(load_future)
+    }
+
+    fn execute_returning_count<'conn, 'query, T>(
+        &'conn mut self,
+        source: T,
+    ) -> Self::ExecuteFuture<'conn, 'query>
+    where
+        T: QueryFragment<Self::Backend> + QueryId + 'query,
+    {
+        let execute = self.with_prepared_statement(source, execute_prepared);
+        self.run_with_connection_future(execute)
+    }
+}
+
+impl AsyncConnection for AsyncPgConnection {
     type TransactionManager = AnsiTransactionManager;
 
     async fn establish(database_url: &str) -> ConnectionResult<Self> {
@@ -196,28 +221,6 @@ impl AsyncConnection for AsyncPgConnection {
                 r.as_ref().err(),
             ));
         r
-    }
-
-    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
-    where
-        T: AsQuery + 'query,
-        T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
-    {
-        let query = source.as_query();
-        let load_future = self.with_prepared_statement(query, load_prepared);
-
-        self.run_with_connection_future(load_future)
-    }
-
-    fn execute_returning_count<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> Self::ExecuteFuture<'conn, 'query>
-    where
-        T: QueryFragment<Self::Backend> + QueryId + 'query,
-    {
-        let execute = self.with_prepared_statement(source, execute_prepared);
-        self.run_with_connection_future(execute)
     }
 
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
@@ -467,7 +470,7 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement<'a, T, F, R>(
-        &mut self,
+        &self,
         query: T,
         callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
     ) -> BoxFuture<'a, QueryResult<R>>
@@ -502,7 +505,7 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement_after_sql_built<'a, F, R>(
-        &mut self,
+        &self,
         callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
         is_safe_to_cache_prepared: QueryResult<bool>,
         query_id: Option<std::any::TypeId>,
