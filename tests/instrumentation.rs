@@ -5,6 +5,7 @@ use diesel::connection::InstrumentationEvent;
 use diesel::query_builder::AsQuery;
 use diesel::QueryResult;
 use diesel_async::AsyncConnection;
+use diesel_async::AsyncConnectionCore;
 use diesel_async::SimpleAsyncConnection;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -107,7 +108,7 @@ async fn check_events_are_emitted_for_execute_returning_count() {
 #[tokio::test]
 async fn check_events_are_emitted_for_load() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    let _ = AsyncConnection::load(&mut conn, users::table.as_query())
+    let _ = AsyncConnectionCore::load(&mut conn, users::table.as_query())
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
@@ -133,7 +134,7 @@ async fn check_events_are_emitted_for_execute_returning_count_does_not_contain_c
 #[tokio::test]
 async fn check_events_are_emitted_for_load_does_not_contain_cache_for_uncached_queries() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    let _ = AsyncConnection::load(&mut conn, diesel::sql_query("select 1"))
+    let _ = AsyncConnectionCore::load(&mut conn, diesel::sql_query("select 1"))
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
@@ -157,7 +158,7 @@ async fn check_events_are_emitted_for_execute_returning_count_does_contain_error
 #[tokio::test]
 async fn check_events_are_emitted_for_load_does_contain_error_for_failures() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    let _ = AsyncConnection::load(&mut conn, diesel::sql_query("invalid")).await;
+    let _ = AsyncConnectionCore::load(&mut conn, diesel::sql_query("invalid")).await;
     let events = events_to_check.lock().unwrap();
     assert_eq!(events.len(), 2, "{:?}", events);
     assert_matches!(events[0], Event::StartQuery { .. });
@@ -185,10 +186,10 @@ async fn check_events_are_emitted_for_execute_returning_count_repeat_does_not_re
 #[tokio::test]
 async fn check_events_are_emitted_for_load_repeat_does_not_repeat_cache() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    let _ = AsyncConnection::load(&mut conn, users::table.as_query())
+    let _ = AsyncConnectionCore::load(&mut conn, users::table.as_query())
         .await
         .unwrap();
-    let _ = AsyncConnection::load(&mut conn, users::table.as_query())
+    let _ = AsyncConnectionCore::load(&mut conn, users::table.as_query())
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();

@@ -125,12 +125,8 @@ pub trait SimpleAsyncConnection {
     fn batch_execute(&mut self, query: &str) -> impl Future<Output = QueryResult<()>> + Send;
 }
 
-/// An async connection to a database
-///
-/// This trait represents a n async database connection. It can be used to query the database through
-/// the query dsl provided by diesel, custom extensions or raw sql queries. It essentially mirrors
-/// the sync diesel [`Connection`](diesel::connection::Connection) implementation
-pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
+/// Core trait for an async database connection
+pub trait AsyncConnectionCore: SimpleAsyncConnection + Send {
     /// The future returned by `AsyncConnection::execute`
     type ExecuteFuture<'conn, 'query>: Future<Output = QueryResult<usize>> + Send;
     /// The future returned by `AsyncConnection::load`
@@ -143,6 +139,37 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     /// The backend this type connects to
     type Backend: Backend;
 
+    #[doc(hidden)]
+    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
+    where
+        T: AsQuery + 'query,
+        T::Query: QueryFragment<Self::Backend> + QueryId + 'query;
+
+    #[doc(hidden)]
+    fn execute_returning_count<'conn, 'query, T>(
+        &'conn mut self,
+        source: T,
+    ) -> Self::ExecuteFuture<'conn, 'query>
+    where
+        T: QueryFragment<Self::Backend> + QueryId + 'query;
+
+    // These functions allow the associated types (`ExecuteFuture`, `LoadFuture`, etc.) to
+    // compile without a `where Self: '_` clause. This is needed the because bound causes
+    // lifetime issues when using `transaction()` with generic `AsyncConnection`s.
+    //
+    // See: https://github.com/rust-lang/rust/issues/87479
+    #[doc(hidden)]
+    fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
+    #[doc(hidden)]
+    fn _silence_lint_on_load_future(_: Self::LoadFuture<'_, '_>) {}
+}
+
+/// An async connection to a database
+///
+/// This trait represents an async database connection. It can be used to query the database through
+/// the query dsl provided by diesel, custom extensions or raw sql queries. It essentially mirrors
+/// the sync diesel [`Connection`](diesel::connection::Connection) implementation
+pub trait AsyncConnection: AsyncConnectionCore + Sized {
     #[doc(hidden)]
     type TransactionManager: TransactionManager<Self>;
 
@@ -337,33 +364,9 @@ pub trait AsyncConnection: SimpleAsyncConnection + Sized + Send {
     }
 
     #[doc(hidden)]
-    fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
-    where
-        T: AsQuery + 'query,
-        T::Query: QueryFragment<Self::Backend> + QueryId + 'query;
-
-    #[doc(hidden)]
-    fn execute_returning_count<'conn, 'query, T>(
-        &'conn mut self,
-        source: T,
-    ) -> Self::ExecuteFuture<'conn, 'query>
-    where
-        T: QueryFragment<Self::Backend> + QueryId + 'query;
-
-    #[doc(hidden)]
     fn transaction_state(
         &mut self,
     ) -> &mut <Self::TransactionManager as TransactionManager<Self>>::TransactionStateData;
-
-    // These functions allow the associated types (`ExecuteFuture`, `LoadFuture`, etc.) to
-    // compile without a `where Self: '_` clause. This is needed the because bound causes
-    // lifetime issues when using `transaction()` with generic `AsyncConnection`s.
-    //
-    // See: https://github.com/rust-lang/rust/issues/87479
-    #[doc(hidden)]
-    fn _silence_lint_on_execute_future(_: Self::ExecuteFuture<'_, '_>) {}
-    #[doc(hidden)]
-    fn _silence_lint_on_load_future(_: Self::LoadFuture<'_, '_>) {}
 
     #[doc(hidden)]
     fn instrumentation(&mut self) -> &mut dyn Instrumentation;

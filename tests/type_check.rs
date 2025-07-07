@@ -4,14 +4,14 @@ use diesel::expression::{AsExpression, ValidGrouping};
 use diesel::prelude::*;
 use diesel::query_builder::{NoFromClause, QueryFragment, QueryId};
 use diesel::sql_types::{self, HasSqlType, SingleValue};
-use diesel_async::{AsyncConnection, RunQueryDsl};
+use diesel_async::{AsyncConnectionCore, RunQueryDsl};
 use std::fmt::Debug;
 
 async fn type_check<T, ST>(conn: &mut TestConnection, value: T)
 where
     T: Clone
         + AsExpression<ST>
-        + FromSqlRow<ST, <TestConnection as AsyncConnection>::Backend>
+        + FromSqlRow<ST, <TestConnection as AsyncConnectionCore>::Backend>
         + Send
         + PartialEq
         + Debug
@@ -19,10 +19,10 @@ where
         + 'static,
     T::Expression: ValidGrouping<()>
         + SelectableExpression<NoFromClause>
-        + QueryFragment<<TestConnection as AsyncConnection>::Backend>
+        + QueryFragment<<TestConnection as AsyncConnectionCore>::Backend>
         + QueryId
         + Send,
-    <TestConnection as AsyncConnection>::Backend: HasSqlType<ST>,
+    <TestConnection as AsyncConnectionCore>::Backend: HasSqlType<ST>,
     ST: SingleValue,
 {
     let res = diesel::select(value.clone().into_sql())

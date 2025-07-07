@@ -1,5 +1,5 @@
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
-use crate::{AnsiTransactionManager, AsyncConnection, SimpleAsyncConnection};
+use crate::{AnsiTransactionManager, AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{
     MaybeCached, QueryFragmentForCachedStatement, StatementCache,
 };
@@ -64,29 +64,12 @@ const CONNECTION_SETUP_QUERIES: &[&str] = &[
     "SET character_set_results = 'utf8mb4'",
 ];
 
-impl AsyncConnection for AsyncMysqlConnection {
+impl AsyncConnectionCore for AsyncMysqlConnection {
     type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
     type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
     type Stream<'conn, 'query> = BoxStream<'conn, QueryResult<Self::Row<'conn, 'query>>>;
     type Row<'conn, 'query> = MysqlRow;
     type Backend = Mysql;
-
-    type TransactionManager = AnsiTransactionManager;
-
-    async fn establish(database_url: &str) -> diesel::ConnectionResult<Self> {
-        let mut instrumentation = DynInstrumentation::default_instrumentation();
-        instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
-            database_url,
-        ));
-        let r = Self::establish_connection_inner(database_url).await;
-        instrumentation.on_connection_event(InstrumentationEvent::finish_establish_connection(
-            database_url,
-            r.as_ref().err(),
-        ));
-        let mut conn = r?;
-        conn.instrumentation = instrumentation;
-        Ok(conn)
-    }
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
@@ -172,6 +155,25 @@ impl AsyncConnection for AsyncMysqlConnection {
                 .try_into()
                 .map_err(|e| diesel::result::Error::DeserializationError(Box::new(e)))
         })
+    }
+}
+
+impl AsyncConnection for AsyncMysqlConnection {
+    type TransactionManager = AnsiTransactionManager;
+
+    async fn establish(database_url: &str) -> diesel::ConnectionResult<Self> {
+        let mut instrumentation = DynInstrumentation::default_instrumentation();
+        instrumentation.on_connection_event(InstrumentationEvent::start_establish_connection(
+            database_url,
+        ));
+        let r = Self::establish_connection_inner(database_url).await;
+        instrumentation.on_connection_event(InstrumentationEvent::finish_establish_connection(
+            database_url,
+            r.as_ref().err(),
+        ));
+        let mut conn = r?;
+        conn.instrumentation = instrumentation;
+        Ok(conn)
     }
 
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
