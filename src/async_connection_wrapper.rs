@@ -123,6 +123,17 @@ mod implementation {
         }
     }
 
+    impl<C, B> AsyncConnectionWrapper<C, B>
+    where
+        C: crate::AsyncConnection,
+    {
+        /// Consumes the [`AsyncConnectionWrapper`] returning the wrapped inner
+        /// [`AsyncConnection`].
+        pub fn into_inner(self) -> C {
+            self.inner
+        }
+    }
+
     impl<C, B> Deref for AsyncConnectionWrapper<C, B> {
         type Target = C;
 
