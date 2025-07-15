@@ -31,9 +31,7 @@ use futures_util::{FutureExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::broadcast;
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_postgres::types::ToSql;
 use tokio_postgres::types::Type;
 use tokio_postgres::Statement;
@@ -172,7 +170,7 @@ pub struct AsyncPgConnection {
     transaction_state: Arc<Mutex<AnsiTransactionManager>>,
     metadata_cache: Arc<Mutex<PgMetadataCache>>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
-    notification_rx: Option<broadcast::Receiver<diesel::pg::PgNotification>>,
+    notification_rx: Option<mpsc::UnboundedReceiver<diesel::pg::PgNotification>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
     // a sync mutex is fine here as we only hold it for a really short time
     instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
@@ -511,7 +509,7 @@ impl AsyncPgConnection {
     async fn setup(
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
-        notification_rx: Option<broadcast::Receiver<diesel::pg::PgNotification>>,
+        notification_rx: Option<mpsc::UnboundedReceiver<diesel::pg::PgNotification>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
         instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
     ) -> ConnectionResult<Self> {
@@ -732,18 +730,25 @@ impl AsyncPgConnection {
     }
 
     pub fn notification_stream(
-        &self,
-    ) -> impl futures_core::Stream<Item = QueryResult<diesel::pg::PgNotification>> {
-        futures_util::stream::unfold(
-            self.notification_rx.as_ref().map(|rx| rx.resubscribe()),
-            |rx| async {
-                let mut rx = rx?;
-                match rx.recv().await {
-                    Ok(notification) => Some((Ok(notification), Some(rx))),
-                    Err(_) => todo!(),
-                }
-            },
-        )
+        &mut self,
+    ) -> impl futures_core::Stream<Item = diesel::pg::PgNotification> + '_ {
+        NotificationStream(self.notification_rx.as_mut())
+    }
+}
+
+struct NotificationStream<'a>(Option<&'a mut mpsc::UnboundedReceiver<diesel::pg::PgNotification>>);
+
+impl futures_core::Stream for NotificationStream<'_> {
+    type Item = diesel::pg::PgNotification;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match &mut self.0 {
+            Some(rx) => rx.poll_recv(cx),
+            None => std::task::Poll::Pending,
+        }
     }
 }
 
@@ -993,14 +998,14 @@ fn drive_connection<S>(
     mut conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
 ) -> (
     broadcast::Receiver<Arc<tokio_postgres::Error>>,
-    broadcast::Receiver<diesel::pg::PgNotification>,
+    mpsc::UnboundedReceiver<diesel::pg::PgNotification>,
     oneshot::Sender<()>,
 )
 where
     S: tokio_postgres::tls::TlsStream + Unpin + Send + 'static,
 {
     let (error_tx, error_rx) = tokio::sync::broadcast::channel(1);
-    let (notification_tx, notification_rx) = tokio::sync::broadcast::channel(1);
+    let (notification_tx, notification_rx) = tokio::sync::mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
 
     tokio::spawn(async move {
@@ -1010,7 +1015,7 @@ where
             match futures_util::future::select(&mut shutdown_rx, conn.next()).await {
                 Either::Left(_) | Either::Right((None, _)) => break,
                 Either::Right((Some(Ok(tokio_postgres::AsyncMessage::Notification(notif))), _)) => {
-                    let _ = notification_tx.send(diesel::pg::PgNotification {
+                    let _: Result<_, _> = notification_tx.send(diesel::pg::PgNotification {
                         process_id: notif.process_id(),
                         channel: notif.channel().to_owned(),
                         payload: notif.payload().to_owned(),
