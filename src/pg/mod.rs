@@ -732,22 +732,11 @@ impl AsyncPgConnection {
     pub fn notification_stream(
         &mut self,
     ) -> impl futures_core::Stream<Item = diesel::pg::PgNotification> + '_ {
-        NotificationStream(self.notification_rx.as_mut())
-    }
-}
-
-struct NotificationStream<'a>(Option<&'a mut mpsc::UnboundedReceiver<diesel::pg::PgNotification>>);
-
-impl futures_core::Stream for NotificationStream<'_> {
-    type Item = diesel::pg::PgNotification;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match &mut self.0 {
-            Some(rx) => rx.poll_recv(cx),
-            None => std::task::Poll::Pending,
+        match &mut self.notification_rx {
+            None => Either::Left(futures_util::stream::pending()),
+            Some(rx) => Either::Right(futures_util::stream::unfold(rx, async |rx| {
+                rx.recv().await.map(move |item| (item, rx))
+            })),
         }
     }
 }
