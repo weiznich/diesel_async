@@ -170,7 +170,7 @@ pub struct AsyncPgConnection {
     transaction_state: Arc<Mutex<AnsiTransactionManager>>,
     metadata_cache: Arc<Mutex<PgMetadataCache>>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
-    notification_rx: Option<mpsc::UnboundedReceiver<diesel::pg::PgNotification>>,
+    notification_rx: Option<mpsc::UnboundedReceiver<QueryResult<diesel::pg::PgNotification>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
     // a sync mutex is fine here as we only hold it for a really short time
     instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
@@ -509,7 +509,7 @@ impl AsyncPgConnection {
     async fn setup(
         conn: tokio_postgres::Client,
         connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
-        notification_rx: Option<mpsc::UnboundedReceiver<diesel::pg::PgNotification>>,
+        notification_rx: Option<mpsc::UnboundedReceiver<QueryResult<diesel::pg::PgNotification>>>,
         shutdown_channel: Option<oneshot::Sender<()>>,
         instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
     ) -> ConnectionResult<Self> {
@@ -731,7 +731,7 @@ impl AsyncPgConnection {
 
     pub fn notification_stream(
         &mut self,
-    ) -> impl futures_core::Stream<Item = diesel::pg::PgNotification> + '_ {
+    ) -> impl futures_core::Stream<Item = QueryResult<diesel::pg::PgNotification>> + '_ {
         match &mut self.notification_rx {
             None => Either::Left(futures_util::stream::pending()),
             Some(rx) => Either::Right(futures_util::stream::unfold(rx, async |rx| {
@@ -987,7 +987,7 @@ fn drive_connection<S>(
     mut conn: tokio_postgres::Connection<tokio_postgres::Socket, S>,
 ) -> (
     broadcast::Receiver<Arc<tokio_postgres::Error>>,
-    mpsc::UnboundedReceiver<diesel::pg::PgNotification>,
+    mpsc::UnboundedReceiver<QueryResult<diesel::pg::PgNotification>>,
     oneshot::Sender<()>,
 )
 where
@@ -996,23 +996,25 @@ where
     let (error_tx, error_rx) = tokio::sync::broadcast::channel(1);
     let (notification_tx, notification_rx) = tokio::sync::mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let mut conn = futures_util::stream::poll_fn(move |cx| conn.poll_message(cx));
 
     tokio::spawn(async move {
-        let mut conn = futures_util::stream::poll_fn(|cx| conn.poll_message(cx));
-
         loop {
             match futures_util::future::select(&mut shutdown_rx, conn.next()).await {
                 Either::Left(_) | Either::Right((None, _)) => break,
                 Either::Right((Some(Ok(tokio_postgres::AsyncMessage::Notification(notif))), _)) => {
-                    let _: Result<_, _> = notification_tx.send(diesel::pg::PgNotification {
+                    let _: Result<_, _> = notification_tx.send(Ok(diesel::pg::PgNotification {
                         process_id: notif.process_id(),
                         channel: notif.channel().to_owned(),
                         payload: notif.payload().to_owned(),
-                    });
+                    }));
                 }
                 Either::Right((Some(Ok(_)), _)) => {}
                 Either::Right((Some(Err(e)), _)) => {
-                    let _ = error_tx.send(Arc::new(e));
+                    let e = Arc::new(e);
+                    let _: Result<_, _> = error_tx.send(e.clone());
+                    let _: Result<_, _> =
+                        notification_tx.send(Err(error_helper::from_tokio_postgres_error(e)));
                     break;
                 }
             }
