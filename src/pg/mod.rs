@@ -729,7 +729,7 @@ impl AsyncPgConnection {
             .on_connection_event(event);
     }
 
-    pub fn notification_stream(
+    pub fn notifications_stream(
         &mut self,
     ) -> impl futures_core::Stream<Item = QueryResult<diesel::pg::PgNotification>> + '_ {
         match &mut self.notification_rx {
