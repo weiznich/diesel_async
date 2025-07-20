@@ -729,6 +729,47 @@ impl AsyncPgConnection {
             .on_connection_event(event);
     }
 
+    /// See Postgres documentation for SQL commands [NOTIFY][] and [LISTEN][]
+    ///
+    /// The returned stream yields all notifications received by the connection, not only notifications received
+    /// after calling the function. The returned stream will never close, so no notifications will just result
+    /// in a pending state.
+    ///
+    /// If there's no connection available to poll, the stream will yield no notifications and be pending forever.
+    /// This can happen if you created the [`AsyncPgConnection`] by the [`try_from`] constructor.
+    ///
+    /// [NOTIFY]: https://www.postgresql.org/docs/current/sql-notify.html
+    /// [LISTEN]: https://www.postgresql.org/docs/current/sql-listen.html
+    /// [`AsyncPgConnection`]: crate::pg::AsyncPgConnection
+    /// [`try_from`]: crate::pg::AsyncPgConnection::try_from
+    ///
+    /// ```rust
+    /// # include!("../doctest_setup.rs");
+    /// # use scoped_futures::ScopedFutureExt;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #     run_test().await.unwrap();
+    /// # }
+    /// #
+    /// # async fn run_test() -> QueryResult<()> {
+    /// #     use diesel_async::RunQueryDsl;
+    /// #     use futures_util::StreamExt;
+    /// #     let conn = &mut connection_no_transaction().await;
+    /// // register the notifications channel we want to receive notifications for
+    /// diesel::sql_query("LISTEN example_channel").execute(conn).await?;
+    /// // send some notification (usually done from a different connection/thread/application)
+    /// diesel::sql_query("NOTIFY example_channel, 'additional data'").execute(conn).await?;
+    ///
+    /// let mut notifications = std::pin::pin!(conn.notifications_stream());
+    /// let mut notification = notifications.next().await.unwrap().unwrap();
+    ///
+    /// assert_eq!(notification.channel, "example_channel");
+    /// assert_eq!(notification.payload, "additional data");
+    /// println!("Notification received from process with id {}", notification.process_id);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn notifications_stream(
         &mut self,
     ) -> impl futures_core::Stream<Item = QueryResult<diesel::pg::PgNotification>> + '_ {
