@@ -114,7 +114,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
     use tokio::sync::Barrier;
 
     table! {
-        users3 {
+        users4 {
             id -> Integer,
         }
     }
@@ -139,7 +139,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 
     let mut conn1 = super::connection_without_transaction().await;
 
-    diesel::sql_query("CREATE TABLE IF NOT EXISTS users3 (id int);")
+    diesel::sql_query("CREATE TABLE IF NOT EXISTS users4 (id int);")
         .execute(&mut conn)
         .await
         .unwrap();
@@ -155,11 +155,11 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 
     let res = tx.run(|conn| {
         Box::pin(async {
-            users3::table.select(users3::id).load::<i32>(conn).await?;
+            users4::table.select(users4::id).load::<i32>(conn).await?;
 
             barrier_1_for_tx1.wait().await;
-            diesel::insert_into(users3::table)
-                .values(users3::id.eq(1))
+            diesel::insert_into(users4::table)
+                .values(users4::id.eq(1))
                 .execute(conn)
                 .await?;
             barrier_2_for_tx1.wait().await;
@@ -174,11 +174,11 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
         let res = tx1
             .run(|conn| {
                 Box::pin(async {
-                    users3::table.select(users3::id).load::<i32>(conn).await?;
+                    users4::table.select(users4::id).load::<i32>(conn).await?;
 
                     barrier_1_for_tx2.wait().await;
-                    diesel::insert_into(users3::table)
-                        .values(users3::id.eq(1))
+                    diesel::insert_into(users4::table)
+                        .values(users4::id.eq(1))
                         .execute(conn)
                         .await?;
 
