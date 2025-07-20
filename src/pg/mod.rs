@@ -775,7 +775,7 @@ impl AsyncPgConnection {
     ) -> impl futures_core::Stream<Item = QueryResult<diesel::pg::PgNotification>> + '_ {
         match &mut self.notification_rx {
             None => Either::Left(futures_util::stream::pending()),
-            Some(rx) => Either::Right(futures_util::stream::unfold(rx, async |rx| {
+            Some(rx) => Either::Right(futures_util::stream::unfold(rx, |rx| async {
                 rx.recv().await.map(move |item| (item, rx))
             })),
         }
