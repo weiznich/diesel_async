@@ -7,6 +7,7 @@ use std::fmt::Debug;
 #[cfg(feature = "postgres")]
 mod custom_types;
 mod instrumentation;
+mod notifications;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
 #[cfg(feature = "async-connection-wrapper")]
