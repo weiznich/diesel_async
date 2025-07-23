@@ -387,9 +387,11 @@ fn update_transaction_manager_status<T>(
     if let Err(diesel::result::Error::DatabaseError(DatabaseErrorKind::SerializationFailure, _)) =
         query_result
     {
-        transaction_manager
-            .status
-            .set_requires_rollback_maybe_up_to_top_level(true)
+        if !transaction_manager.is_commit {
+            transaction_manager
+                .status
+                .set_requires_rollback_maybe_up_to_top_level(true);
+        }
     }
     query_result
 }
