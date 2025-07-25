@@ -146,6 +146,11 @@ pub struct AnsiTransactionManager {
     // See https://github.com/weiznich/diesel_async/issues/198 for
     // details
     pub(crate) is_broken: Arc<AtomicBool>,
+    // this boolean flag tracks whether we are currently in this process
+    // of trying to commit the transaction. this is useful because if we
+    // are and we get a serialization failure, we might not want to attempt
+    // a rollback up the chain.
+    pub(crate) is_commit: bool,
 }
 
 impl AnsiTransactionManager {
@@ -355,9 +360,18 @@ where
         conn.instrumentation()
             .on_connection_event(InstrumentationEvent::commit_transaction(depth));
 
-        let is_broken = conn.transaction_state().is_broken.clone();
+        let is_broken = {
+            let transaction_state = conn.transaction_state();
+            transaction_state.is_commit = true;
+            transaction_state.is_broken.clone()
+        };
 
-        match Self::critical_transaction_block(&is_broken, conn.batch_execute(&commit_sql)).await {
+        let res =
+            Self::critical_transaction_block(&is_broken, conn.batch_execute(&commit_sql)).await;
+
+        conn.transaction_state().is_commit = false;
+
+        match res {
             Ok(()) => {
                 match Self::get_transaction_state(conn)?
                     .change_transaction_depth(TransactionDepthChange::DecreaseDepth)
@@ -392,6 +406,9 @@ where
                             });
                         }
                     }
+                } else {
+                    Self::get_transaction_state(conn)?
+                        .change_transaction_depth(TransactionDepthChange::DecreaseDepth)?;
                 }
                 Err(commit_error)
             }
