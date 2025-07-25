@@ -191,7 +191,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
     };
 
     let (res, res1) = tokio::join!(res, res1);
-    let _ = diesel::sql_query("DROP TABLE users3")
+    let _ = diesel::sql_query("DROP TABLE users4")
         .execute(&mut conn1)
         .await;
 
