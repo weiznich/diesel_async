@@ -503,7 +503,9 @@ impl AsyncPgConnection {
             Some(error_rx),
             Some(notification_rx),
             Some(shutdown_tx),
-            Arc::new(std::sync::Mutex::new(DynInstrumentation::none())),
+            Arc::new(std::sync::Mutex::new(
+                DynInstrumentation::default_instrumentation(),
+            )),
         )
         .await
     }
