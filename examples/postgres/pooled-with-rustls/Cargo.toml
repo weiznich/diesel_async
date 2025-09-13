@@ -16,7 +16,5 @@ tokio-postgres-rustls = "0.13.0"
 
 
 [dependencies.diesel]
-version = "2.2.0"
+version = "2.3.0"
 default-features = false
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"

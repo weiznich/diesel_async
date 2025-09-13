@@ -11,16 +11,12 @@ futures-util = "0.3.21"
 tokio = { version = "1.2.0", default-features = false, features = ["macros", "rt-multi-thread"] }
 
 [dependencies.diesel]
-version = "2.2.0"
+version = "2.3.0"
 default-features = false
 features = ["returning_clauses_for_sqlite_3_35"]
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
 
 [dependencies.diesel_migrations]
-version = "2.2.0"
-git = "https://github.com/diesel-rs/diesel"
-branch = "master"
+version = "2.3.0"
 
 [features]
 default = ["sqlite"]

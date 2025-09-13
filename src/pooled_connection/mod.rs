@@ -306,28 +306,6 @@ where
     }
 }
 
-#[derive(diesel::query_builder::QueryId)]
-struct CheckConnectionQuery;
-
-impl<DB> diesel::query_builder::QueryFragment<DB> for CheckConnectionQuery
-where
-    DB: diesel::backend::Backend,
-{
-    fn walk_ast<'b>(
-        &'b self,
-        mut pass: diesel::query_builder::AstPass<'_, 'b, DB>,
-    ) -> diesel::QueryResult<()> {
-        pass.push_sql("SELECT 1");
-        Ok(())
-    }
-}
-
-impl diesel::query_builder::Query for CheckConnectionQuery {
-    type SqlType = diesel::sql_types::Integer;
-}
-
-impl<C> diesel::query_dsl::RunQueryDsl<C> for CheckConnectionQuery {}
-
 #[doc(hidden)]
 pub trait PoolableConnection: AsyncConnection {
     /// Check if a connection is still valid
