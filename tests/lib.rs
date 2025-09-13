@@ -167,6 +167,51 @@ async fn postgres_cancel_token() {
     }
 }
 
+#[cfg(feature = "mysql")]
+#[tokio::test]
+async fn mysql_cancel_token() {
+    use std::time::Duration;
+
+    use diesel::result::{DatabaseErrorKind, Error};
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
+    // execute a long-running query on a separate thread
+    let task = tokio::spawn(async move {
+        let conn = &mut connection().await;
+        let token = conn.cancel_token();
+
+        // send the token back to the main thread via a oneshot channel
+        sender
+            .send(token)
+            .unwrap_or_else(|_| panic!("couldn't send token"));
+
+        diesel::dsl::sql::<diesel::sql_types::Integer>("SELECT SLEEP(5)")
+            .load::<i32>(conn)
+            .await
+    });
+
+    // wait for the cancellation token to be sent
+    if let Ok(token) = receiver.await {
+        // give the query time to start before invoking the token
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        token.cancel_query().await.unwrap();
+    }
+
+    // make sure the query task resulted in a cancellation error or a return value of 1:
+    match task.await.unwrap() {
+        Err(e) => match e {
+            Error::DatabaseError(DatabaseErrorKind::Unknown, v)
+                if v.message() == "Query execution was interrupted" => {}
+            _ => panic!("unexpected error: {:?}", e),
+        },
+        Ok(r) => match r[0] {
+            1 => {}
+            _ => panic!(""),
+        },
+    }
+}
+
 #[cfg(feature = "postgres")]
 async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
