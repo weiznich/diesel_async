@@ -207,7 +207,7 @@ async fn mysql_cancel_token() {
         },
         Ok(r) => match r[0] {
             1 => {}
-            _ => panic!(""),
+            _ => panic!("query completed successfully without cancellation"),
         },
     }
 }
