@@ -7,6 +7,8 @@ use std::fmt::Debug;
 #[cfg(feature = "postgres")]
 mod custom_types;
 mod instrumentation;
+#[cfg(feature = "migrations")]
+mod migrations;
 mod notifications;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
@@ -161,7 +163,7 @@ async fn postgres_cancel_token() {
     match err {
         Error::DatabaseError(DatabaseErrorKind::Unknown, v)
             if v.message() == "canceling statement due to user request" => {}
-        _ => panic!("unexpected error: {:?}", err),
+        _ => panic!("unexpected error: {err:?}"),
     }
 }
 

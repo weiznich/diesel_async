@@ -214,6 +214,7 @@ where
     }
 }
 
+#[diagnostic::do_not_recommend]
 impl<C> AsyncConnection for C
 where
     C: DerefMut + Send,

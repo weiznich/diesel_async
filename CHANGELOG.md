@@ -6,6 +6,8 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+* Added support for running migrations via `AsyncMigrationHarness`
+
 ## [0.6.1] - 2025-07-03
 
 * Fix features for some dependencies
