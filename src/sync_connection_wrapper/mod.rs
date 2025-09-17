@@ -499,7 +499,7 @@ mod implementation {
                 Tokio::Runtime(runtime) => runtime.spawn_blocking(task),
             };
 
-            fut.map_err(|err| Box::from(err)).boxed()
+            fut.map_err(Box::from).boxed()
         }
 
         fn get_runtime() -> Self {

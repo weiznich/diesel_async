@@ -24,10 +24,13 @@ async fn concurrent_serializable_transactions_behave_correctly() {
 
     let barrier_1 = Arc::new(Barrier::new(2));
     let barrier_2 = Arc::new(Barrier::new(2));
+    let barrier_3 = Arc::new(Barrier::new(2));
     let barrier_1_for_tx1 = barrier_1.clone();
     let barrier_1_for_tx2 = barrier_1.clone();
     let barrier_2_for_tx1 = barrier_2.clone();
     let barrier_2_for_tx2 = barrier_2.clone();
+    let barrier_3_for_tx1 = barrier_3.clone();
+    let barrier_3_for_tx2 = barrier_3.clone();
 
     let mut tx = conn.build_transaction().serializable().read_write();
 
@@ -40,6 +43,7 @@ async fn concurrent_serializable_transactions_behave_correctly() {
                 .values(users3::id.eq(1))
                 .execute(conn)
                 .await?;
+            barrier_3_for_tx1.wait().await;
             barrier_2_for_tx1.wait().await;
 
             Ok::<_, diesel::result::Error>(())
@@ -59,6 +63,7 @@ async fn concurrent_serializable_transactions_behave_correctly() {
                         .values(users3::id.eq(1))
                         .execute(conn)
                         .await?;
+                    barrier_3_for_tx2.wait().await;
 
                     Ok::<_, diesel::result::Error>(())
                 })
@@ -146,10 +151,13 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 
     let barrier_1 = Arc::new(Barrier::new(2));
     let barrier_2 = Arc::new(Barrier::new(2));
+    let barrier_3 = Arc::new(Barrier::new(2));
     let barrier_1_for_tx1 = barrier_1.clone();
     let barrier_1_for_tx2 = barrier_1.clone();
     let barrier_2_for_tx1 = barrier_2.clone();
     let barrier_2_for_tx2 = barrier_2.clone();
+    let barrier_3_for_tx1 = barrier_3.clone();
+    let barrier_3_for_tx2 = barrier_3.clone();
 
     let mut tx = conn.build_transaction().serializable().read_write();
 
@@ -162,6 +170,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
                 .values(users4::id.eq(1))
                 .execute(conn)
                 .await?;
+            barrier_3_for_tx1.wait().await;
             barrier_2_for_tx1.wait().await;
 
             Ok::<_, diesel::result::Error>(())
@@ -181,6 +190,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
                         .values(users4::id.eq(1))
                         .execute(conn)
                         .await?;
+                    barrier_3_for_tx2.wait().await;
 
                     Ok::<_, diesel::result::Error>(())
                 })
