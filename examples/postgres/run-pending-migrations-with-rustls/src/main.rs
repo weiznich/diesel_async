@@ -1,6 +1,5 @@
 use diesel::{ConnectionError, ConnectionResult};
-use diesel_async::async_connection_wrapper::AsyncConnectionWrapper;
-use diesel_async::AsyncPgConnection;
+use diesel_async::{AsyncMigrationHarness, AsyncPgConnection};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
@@ -10,19 +9,15 @@ use rustls_platform_verifier::ConfigVerifierExt;
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     // Should be in the form of postgres://user:password@localhost/database?sslmode=require
     let db_url = std::env::var("DATABASE_URL").expect("Env var `DATABASE_URL` not set");
 
     let async_connection = establish_connection(db_url.as_str()).await?;
 
-    let mut async_wrapper: AsyncConnectionWrapper<AsyncPgConnection> =
-        AsyncConnectionWrapper::from(async_connection);
-
-    tokio::task::spawn_blocking(move || {
-        async_wrapper.run_pending_migrations(MIGRATIONS).unwrap();
-    })
-    .await?;
+    let mut harness = AsyncMigrationHarness::new(async_connection);
+    harness.run_pending_migrations(MIGRATIONS)?;
+    let _async_connection = harness.into_inner();
 
     Ok(())
 }

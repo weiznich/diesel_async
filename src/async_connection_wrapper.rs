@@ -99,7 +99,7 @@ pub type AsyncConnectionWrapper<C, B = self::implementation::Tokio> =
 #[cfg(not(feature = "tokio"))]
 pub use self::implementation::AsyncConnectionWrapper;
 
-mod implementation {
+pub(crate) mod implementation {
     use diesel::connection::{CacheSize, Instrumentation, SimpleConnection};
     use std::ops::{Deref, DerefMut};
 
