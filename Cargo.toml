@@ -36,6 +36,7 @@ deadpool = { version = "0.12", optional = true, default-features = false, featur
 ] }
 mobc = { version = ">=0.7,<0.10", optional = true }
 scoped-futures = { version = "0.1", features = ["std"] }
+pin-project-lite = "0.2.16"
 
 [dependencies.diesel]
 version = "~2.3.0"
