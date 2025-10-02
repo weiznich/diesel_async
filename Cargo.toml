@@ -1,6 +1,6 @@
 [package]
 name = "diesel-async"
-version = "0.6.1"
+version = "0.7.0"
 authors = ["Georg Semmler <github@weiznich.de>"]
 edition = "2021"
 autotests = false
@@ -110,6 +110,7 @@ rustdoc-args = ["--cfg", "docsrs", "-Z", "unstable-options", "--generate-link-to
 [workspace]
 members = [
   ".",
+  "examples/postgres/pipelining",
   "examples/postgres/pooled-with-rustls",
   "examples/postgres/run-pending-migrations-with-rustls",
   "examples/sync-wrapper",
