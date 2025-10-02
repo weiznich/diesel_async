@@ -128,6 +128,9 @@ mod transaction_manager;
 #[cfg(feature = "mysql")]
 #[doc(inline)]
 pub use self::mysql::AsyncMysqlConnection;
+#[cfg(feature = "mysql")]
+#[doc(inline)]
+pub use self::mysql::MysqlCancelToken;
 #[cfg(feature = "postgres")]
 #[doc(inline)]
 pub use self::pg::AsyncPgConnection;

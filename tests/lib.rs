@@ -167,6 +167,52 @@ async fn postgres_cancel_token() {
     }
 }
 
+#[cfg(feature = "mysql")]
+#[tokio::test]
+async fn mysql_cancel_token() {
+    use diesel::result::{DatabaseErrorKind, Error};
+    use std::time::Duration;
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
+    // execute a long-running query in a separate future
+    let query_future = async move {
+        let conn = &mut connection().await;
+        let token = conn.cancel_token();
+
+        // send the token back to the main thread via a oneshot channel
+        sender
+            .send(token)
+            .unwrap_or_else(|_| panic!("couldn't send token"));
+
+        diesel::dsl::sql::<diesel::sql_types::Integer>("SELECT SLEEP(5)")
+            .get_result::<i32>(conn)
+            .await
+    };
+    let cancel_future = async move {
+        // wait for the cancellation token to be sent
+        if let Ok(token) = receiver.await {
+            // give the query time to start before invoking the token
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            token.cancel_query().await.unwrap();
+        } else {
+            panic!("Failed to receive cancel token");
+        }
+    };
+
+    let (task, _) = tokio::join!(query_future, cancel_future);
+
+    // make sure the query task resulted in a cancellation error or a return value of 1:
+    match task {
+        Err(Error::DatabaseError(DatabaseErrorKind::Unknown, v))
+            if v.message() == "Query execution was interrupted" => {}
+        Err(e) => panic!("unexpected error: {:?}", e),
+        // mysql 8.4 returns 1 from a canceled sleep instead of an error
+        Ok(1) => {}
+        Ok(_) => panic!("query completed successfully without cancellation"),
+    }
+}
+
 #[cfg(feature = "postgres")]
 async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(

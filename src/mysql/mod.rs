@@ -19,10 +19,12 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Opts, OptsBuilder, Statement};
 use std::future::Future;
 
+mod cancel_token;
 mod error_helper;
 mod row;
 mod serialize;
 
+pub use self::cancel_token::MysqlCancelToken;
 use self::error_helper::ErrorHelper;
 use self::row::MysqlRow;
 use self::serialize::ToSqlHelper;
@@ -252,6 +254,14 @@ impl AsyncMysqlConnection {
         }
 
         Ok(conn)
+    }
+
+    /// Constructs a cancellation token that can later be used to request cancellation of a query running on the connection associated with this client.
+    pub fn cancel_token(&self) -> MysqlCancelToken {
+        let kill_id = self.conn.id();
+        let opts = self.conn.opts().clone();
+
+        MysqlCancelToken { kill_id, opts }
     }
 
     fn with_prepared_statement<'conn, T, F, R>(
