@@ -1166,46 +1166,42 @@ mod tests {
             .await
             .unwrap();
 
-        fn erase<'a, T: Future + Send + 'a>(t: T) -> impl Future<Output = T::Output> + Send + 'a {
-            t
-        }
-
         async fn fn12(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
             let f1 = diesel::select(1_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
             let f2 = diesel::select(2_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
 
-            erase(try_join(f1, f2)).await
+            try_join(f1, f2).await
         }
 
-        async fn fn34(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
-            let f3 = diesel::select(3_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
-            let f4 = diesel::select(4_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
-
-            try_join(f3, f4).boxed().await
-        }
-
-        async fn fn56(mut conn: &AsyncPgConnection) -> QueryResult<(i32, i32)> {
+        async fn fn37(
+            mut conn: &AsyncPgConnection,
+        ) -> QueryResult<(usize, (Vec<i32>, (i32, (Vec<i32>, i32))))> {
+            let f3 = diesel::select(0_i32.into_sql::<Integer>()).execute(&mut conn);
+            let f4 = diesel::select(4_i32.into_sql::<Integer>()).load::<i32>(&mut conn);
             let f5 = diesel::select(5_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
-            let f6 = diesel::select(6_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
+            let f6 = diesel::select(6_i32.into_sql::<Integer>()).get_results::<i32>(&mut conn);
+            let f7 = diesel::select(7_i32.into_sql::<Integer>()).first::<i32>(&mut conn);
 
-            try_join(f5.boxed(), f6.boxed()).await
+            try_join(f3, try_join(f4, try_join(f5, try_join(f6, f7)))).await
         }
 
         conn.transaction(|conn| {
             async move {
                 let f12 = fn12(conn);
-                let f34 = fn34(conn);
-                let f56 = fn56(conn);
+                let f37 = fn37(conn);
 
-                let ((r1, r2), ((r3, r4), (r5, r6))) =
-                    try_join(f12, try_join(f34, f56)).await.unwrap();
+                let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
 
                 assert_eq!(r1, 1);
                 assert_eq!(r2, 2);
-                assert_eq!(r3, 3);
-                assert_eq!(r4, 4);
+                assert_eq!(r3, 1);
+                assert_eq!(r4, vec![4]);
                 assert_eq!(r5, 5);
-                assert_eq!(r6, 6);
+                assert_eq!(r6, vec![6]);
+                assert_eq!(r7, 7);
+
+                fn12(conn).await?;
+                fn37(conn).await?;
 
                 QueryResult::<_>::Ok(())
             }

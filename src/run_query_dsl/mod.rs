@@ -1,13 +1,15 @@
+mod utils;
+
 use crate::AsyncConnectionCore;
 use diesel::associations::HasTable;
 use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
 use futures_core::future::BoxFuture;
-use futures_core::Stream;
-use futures_util::{future, stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+#[cfg(any(feature = "mysql", feature = "postgres"))]
+use futures_util::FutureExt;
+use futures_util::{stream, StreamExt, TryStreamExt};
 use std::future::Future;
-use std::pin::Pin;
 
 /// The traits used by `QueryDsl`.
 ///
@@ -22,7 +24,7 @@ pub mod methods {
     use diesel::expression::QueryMetadata;
     use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
     use diesel::query_dsl::CompatibleType;
-    use futures_util::{Future, Stream, TryFutureExt};
+    use futures_util::{Future, Stream};
 
     /// The `execute` method
     ///
@@ -74,6 +76,7 @@ pub mod methods {
         type LoadFuture<'conn>: Future<Output = QueryResult<Self::Stream<'conn>>> + Send
         where
             Conn: 'conn;
+
         /// The inner stream returned by [`LoadQuery::internal_load`]
         type Stream<'conn>: Stream<Item = QueryResult<U>> + Send
         where
@@ -96,10 +99,7 @@ pub mod methods {
         ST: 'static,
     {
         type LoadFuture<'conn>
-            = future::MapOk<
-            Conn::LoadFuture<'conn, 'query>,
-            fn(Conn::Stream<'conn, 'query>) -> Self::Stream<'conn>,
-        >
+            = utils::MapOk<Conn::LoadFuture<'conn, 'query>, Self::Stream<'conn>>
         where
             Conn: 'conn;
 
@@ -112,32 +112,12 @@ pub mod methods {
             Conn: 'conn;
 
         fn internal_load(self, conn: &mut Conn) -> Self::LoadFuture<'_> {
-            conn.load(self)
-                .map_ok(map_result_stream_future::<U, _, _, DB, ST>)
+            utils::MapOk::new(conn.load(self), |stream| {
+                stream.map(|row| {
+                    U::build_from_row(&row?).map_err(diesel::result::Error::DeserializationError)
+                })
+            })
         }
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn map_result_stream_future<'s, 'a, U, S, R, DB, ST>(
-        stream: S,
-    ) -> stream::Map<S, fn(QueryResult<R>) -> QueryResult<U>>
-    where
-        S: Stream<Item = QueryResult<R>> + Send + 's,
-        R: diesel::row::Row<'a, DB> + 's,
-        DB: Backend + 'static,
-        U: FromSqlRow<ST, DB> + 'static,
-        ST: 'static,
-    {
-        stream.map(map_row_helper::<_, DB, U, ST>)
-    }
-
-    fn map_row_helper<'a, R, DB, U, ST>(row: QueryResult<R>) -> QueryResult<U>
-    where
-        U: FromSqlRow<ST, DB>,
-        R: diesel::row::Row<'a, DB>,
-        DB: Backend,
-    {
-        U::build_from_row(&row?).map_err(diesel::result::Error::DeserializationError)
     }
 }
 
@@ -149,37 +129,24 @@ pub mod methods {
 // the same connection
 #[allow(type_alias_bounds)] // we need these bounds otherwise we cannot use GAT's
 pub mod return_futures {
+    use crate::run_query_dsl::utils;
+
     use super::methods::LoadQuery;
-    use diesel::QueryResult;
-    use futures_util::{future, stream};
+    use futures_util::stream;
     use std::pin::Pin;
 
     /// The future returned by [`RunQueryDsl::load`](super::RunQueryDsl::load)
     /// and [`RunQueryDsl::get_results`](super::RunQueryDsl::get_results)
     ///
     /// This is essentially `impl Future<Output = QueryResult<Vec<U>>>`
-    pub type LoadFuture<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> = future::AndThen<
-        Q::LoadFuture<'conn>,
-        stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
-        fn(Q::Stream<'conn>) -> stream::TryCollect<Q::Stream<'conn>, Vec<U>>,
-    >;
+    pub type LoadFuture<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> =
+        utils::AndThen<Q::LoadFuture<'conn>, stream::TryCollect<Q::Stream<'conn>, Vec<U>>>;
 
     /// The future returned by [`RunQueryDsl::get_result`](super::RunQueryDsl::get_result)
     ///
     /// This is essentially `impl Future<Output = QueryResult<U>>`
-    pub type GetResult<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> = future::AndThen<
-        Q::LoadFuture<'conn>,
-        future::Map<
-            stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
-            fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
-        >,
-        fn(
-            Q::Stream<'conn>,
-        ) -> future::Map<
-            stream::StreamFuture<Pin<Box<Q::Stream<'conn>>>>,
-            fn((Option<QueryResult<U>>, Pin<Box<Q::Stream<'conn>>>)) -> QueryResult<U>,
-        >,
-    >;
+    pub type GetResult<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> =
+        utils::AndThen<Q::LoadFuture<'conn>, utils::LoadNext<Pin<Box<Q::Stream<'conn>>>>>;
 }
 
 /// Methods used to execute queries.
@@ -346,13 +313,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        fn collect_result<U, S>(stream: S) -> stream::TryCollect<S, Vec<U>>
-        where
-            S: Stream<Item = QueryResult<U>>,
-        {
-            stream.try_collect()
-        }
-        self.internal_load(conn).and_then(collect_result::<U, _>)
+        utils::AndThen::new(self.internal_load(conn), |stream| stream.try_collect())
     }
 
     /// Executes the given query, returning a [`Stream`] with the returned rows.
@@ -547,29 +508,9 @@ pub trait RunQueryDsl<Conn>: Sized {
         Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        #[allow(clippy::type_complexity)]
-        fn get_next_stream_element<S, U>(
-            stream: S,
-        ) -> future::Map<
-            stream::StreamFuture<Pin<Box<S>>>,
-            fn((Option<QueryResult<U>>, Pin<Box<S>>)) -> QueryResult<U>,
-        >
-        where
-            S: Stream<Item = QueryResult<U>>,
-        {
-            fn map_option_to_result<U, S>(
-                (o, _): (Option<QueryResult<U>>, Pin<Box<S>>),
-            ) -> QueryResult<U> {
-                match o {
-                    Some(s) => s,
-                    None => Err(diesel::result::Error::NotFound),
-                }
-            }
-
-            Box::pin(stream).into_future().map(map_option_to_result)
-        }
-
-        self.load_stream(conn).and_then(get_next_stream_element)
+        utils::AndThen::new(self.internal_load(conn), |stream| {
+            utils::LoadNext::new(Box::pin(stream))
+        })
     }
 
     /// Runs the command, returning an `Vec` with the affected rows.
