@@ -11,6 +11,7 @@ keywords = ["orm", "database", "sql", "async"]
 categories = ["database"]
 description = "An async extension for Diesel the safe, extensible ORM and Query Builder"
 rust-version = "1.84.0"
+include = ["README.md", "src/**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [dependencies]
 futures-core = "0.3.17"
