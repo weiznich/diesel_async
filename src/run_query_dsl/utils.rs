@@ -4,95 +4,77 @@ use std::task::{Context, Poll};
 
 use diesel::QueryResult;
 use futures_core::{ready, TryFuture, TryStream};
-use futures_util::TryStreamExt;
-use pin_project_lite::pin_project;
+use futures_util::{TryFutureExt, TryStreamExt};
 
-pin_project! {
-    /// Reimplementation of [`futures_util::future::Map`] without the generic closure argument
-    #[project = MapProj]
-    #[project_replace = MapProjReplace]
-    pub enum Map<Fut: Future, T> {
-         Incomplete {
-            #[pin]
-            future: Fut,
-            f: fn(Fut::Output) -> QueryResult<T>,
-        },
-        Complete,
-    }
+// We use a custom future implementation here to erase some lifetimes
+// that otherwise need to be specified explicitly
+//
+// Specifying these lifetimes results in the compiler not beeing
+// able to look through the generic code and emit
+// lifetime erros for pipelined queries. See
+// https://github.com/weiznich/diesel_async/issues/249 for more context
+#[repr(transparent)]
+pub struct MapOk<F: TryFutureExt, T> {
+    future: futures_util::future::MapOk<F, fn(F::Ok) -> T>,
 }
 
-impl<Fut: Future, T> Map<Fut, T> {
-    pub(crate) fn new(future: Fut, f: fn(Fut::Output) -> QueryResult<T>) -> Self {
-        Self::Incomplete { future, f }
-    }
-}
-
-impl<Fut: Future, T> Future for Map<Fut, T> {
-    type Output = QueryResult<T>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<QueryResult<T>> {
-        match self.as_mut().project() {
-            MapProj::Incomplete { future, .. } => {
-                let output = ready!(future.poll(cx));
-                match self.as_mut().project_replace(Map::Complete) {
-                    MapProjReplace::Incomplete { f, .. } => Poll::Ready(f(output)),
-                    MapProjReplace::Complete => unreachable!(),
-                }
-            }
-            MapProj::Complete => panic!("Map polled after completion"),
-        }
-    }
-}
-
-pin_project! {
-    /// Reimplementation of [`futures_util::future::AndThen`] without the generic closure argument
-    #[project = AndThenProj]
-    pub enum AndThen<Fut1: Future, Fut2> {
-        First {
-            #[pin]
-            future1: Map<Fut1, Fut2>,
-        },
-        Second {
-            #[pin]
-            future2: Fut2,
-        },
-        Empty,
-    }
-}
-
-impl<Fut1: Future, Fut2> AndThen<Fut1, Fut2> {
-    pub(crate) fn new(fut1: Fut1, f: fn(Fut1::Output) -> QueryResult<Fut2>) -> AndThen<Fut1, Fut2> {
-        Self::First {
-            future1: Map::new(fut1, f),
-        }
-    }
-}
-
-impl<Fut1, Fut2> Future for AndThen<Fut1, Fut2>
+impl<F, T> Future for MapOk<F, T>
 where
-    Fut1: TryFuture<Error = diesel::result::Error>,
-    Fut2: TryFuture<Error = diesel::result::Error>,
+    F: TryFuture,
+    futures_util::future::MapOk<F, fn(F::Ok) -> T>: Future<Output = Result<T, F::Error>>,
 {
-    type Output = QueryResult<Fut2::Ok>;
+    type Output = Result<T, F::Error>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            match self.as_mut().project() {
-                AndThenProj::First { future1 } => match ready!(future1.try_poll(cx)) {
-                    Ok(future2) => self.set(Self::Second { future2 }),
-                    Err(error) => {
-                        self.set(Self::Empty);
-                        break Poll::Ready(Err(error));
-                    }
-                },
-                AndThenProj::Second { future2 } => {
-                    let output = ready!(future2.try_poll(cx));
-                    self.set(Self::Empty);
-                    break Poll::Ready(output);
-                }
-                AndThenProj::Empty => panic!("AndThen polled after completion"),
-            }
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        unsafe {
+            // SAFETY: This projects pinning to the only inner field, so it
+            // should be safe
+            self.map_unchecked_mut(|s| &mut s.future)
         }
+        .poll(cx)
+    }
+}
+
+impl<Fut: TryFutureExt, T> MapOk<Fut, T> {
+    pub(crate) fn new(future: Fut, f: fn(Fut::Ok) -> T) -> Self {
+        Self {
+            future: future.map_ok(f),
+        }
+    }
+}
+
+// similar to `MapOk` above this mainly exists to hide the lifetime
+#[repr(transparent)]
+pub struct AndThen<F1: TryFuture, F2> {
+    future: futures_util::future::AndThen<F1, F2, fn(F1::Ok) -> F2>,
+}
+
+impl<Fut1, Fut2> AndThen<Fut1, Fut2>
+where
+    Fut1: TryFuture,
+    Fut2: TryFuture<Error = Fut1::Error>,
+{
+    pub(crate) fn new(fut1: Fut1, f: fn(Fut1::Ok) -> Fut2) -> AndThen<Fut1, Fut2> {
+        Self {
+            future: fut1.and_then(f),
+        }
+    }
+}
+
+impl<F1, F2> Future for AndThen<F1, F2>
+where
+    F1: TryFuture,
+    F2: TryFuture<Error = F1::Error>,
+{
+    type Output = Result<F2::Ok, F2::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        unsafe {
+            // SAFETY: This projects pinning to the only inner field, so it
+            // should be safe
+            self.map_unchecked_mut(|s| &mut s.future)
+        }
+        .poll(cx)
     }
 }
 

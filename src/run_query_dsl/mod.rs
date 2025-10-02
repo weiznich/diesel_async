@@ -99,7 +99,7 @@ pub mod methods {
         ST: 'static,
     {
         type LoadFuture<'conn>
-            = utils::Map<Conn::LoadFuture<'conn, 'query>, Self::Stream<'conn>>
+            = utils::MapOk<Conn::LoadFuture<'conn, 'query>, Self::Stream<'conn>>
         where
             Conn: 'conn;
 
@@ -112,10 +112,10 @@ pub mod methods {
             Conn: 'conn;
 
         fn internal_load(self, conn: &mut Conn) -> Self::LoadFuture<'_> {
-            utils::Map::new(conn.load(self), |stream| {
-                Ok(stream?.map(|row| {
+            utils::MapOk::new(conn.load(self), |stream| {
+                stream.map(|row| {
                     U::build_from_row(&row?).map_err(diesel::result::Error::DeserializationError)
-                }))
+                })
             })
         }
     }
@@ -313,7 +313,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         Conn: AsyncConnectionCore,
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
-        utils::AndThen::new(self.internal_load(conn), |stream| Ok(stream?.try_collect()))
+        utils::AndThen::new(self.internal_load(conn), |stream| stream.try_collect())
     }
 
     /// Executes the given query, returning a [`Stream`] with the returned rows.
@@ -509,7 +509,7 @@ pub trait RunQueryDsl<Conn>: Sized {
         Self: methods::LoadQuery<'query, Conn, U> + 'query,
     {
         utils::AndThen::new(self.internal_load(conn), |stream| {
-            Ok(utils::LoadNext::new(Box::pin(stream?)))
+            utils::LoadNext::new(Box::pin(stream))
         })
     }
 

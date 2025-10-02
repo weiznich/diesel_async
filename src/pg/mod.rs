@@ -1175,14 +1175,14 @@ mod tests {
 
         async fn fn37(
             mut conn: &AsyncPgConnection,
-        ) -> QueryResult<(usize, Vec<i32>, i32, Vec<i32>, i32)> {
+        ) -> QueryResult<(usize, (Vec<i32>, (i32, (Vec<i32>, i32))))> {
             let f3 = diesel::select(0_i32.into_sql::<Integer>()).execute(&mut conn);
             let f4 = diesel::select(4_i32.into_sql::<Integer>()).load::<i32>(&mut conn);
             let f5 = diesel::select(5_i32.into_sql::<Integer>()).get_result::<i32>(&mut conn);
             let f6 = diesel::select(6_i32.into_sql::<Integer>()).get_results::<i32>(&mut conn);
             let f7 = diesel::select(7_i32.into_sql::<Integer>()).first::<i32>(&mut conn);
 
-            try_join!(f3, f4, f5, f6, f7)
+            try_join(f3, try_join(f4, try_join(f5, try_join(f6, f7)))).await
         }
 
         conn.transaction(|conn| {
@@ -1190,7 +1190,7 @@ mod tests {
                 let f12 = fn12(conn);
                 let f37 = fn37(conn);
 
-                let ((r1, r2), (r3, r4, r5, r6, r7)) = try_join!(f12, f37).unwrap();
+                let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
 
                 assert_eq!(r1, 1);
                 assert_eq!(r2, 2);
