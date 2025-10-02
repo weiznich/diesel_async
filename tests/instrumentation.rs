@@ -99,7 +99,7 @@ async fn check_events_are_emitted_for_execute_returning_count() {
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 3, "{:?}", events);
+    assert_eq!(events.len(), 3, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::CacheQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -112,7 +112,7 @@ async fn check_events_are_emitted_for_load() {
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 3, "{:?}", events);
+    assert_eq!(events.len(), 3, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::CacheQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -126,7 +126,7 @@ async fn check_events_are_emitted_for_execute_returning_count_does_not_contain_c
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 2, "{:?}", events);
+    assert_eq!(events.len(), 2, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::FinishQuery { .. });
 }
@@ -138,7 +138,7 @@ async fn check_events_are_emitted_for_load_does_not_contain_cache_for_uncached_q
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 2, "{:?}", events);
+    assert_eq!(events.len(), 2, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::FinishQuery { .. });
 }
@@ -150,7 +150,7 @@ async fn check_events_are_emitted_for_execute_returning_count_does_contain_error
         .execute_returning_count(diesel::sql_query("invalid"))
         .await;
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 2, "{:?}", events);
+    assert_eq!(events.len(), 2, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::FinishQuery { error: Some(_), .. });
 }
@@ -160,7 +160,7 @@ async fn check_events_are_emitted_for_load_does_contain_error_for_failures() {
     let (events_to_check, mut conn) = setup_test_case().await;
     let _ = AsyncConnectionCore::load(&mut conn, diesel::sql_query("invalid")).await;
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 2, "{:?}", events);
+    assert_eq!(events.len(), 2, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::FinishQuery { error: Some(_), .. });
 }
@@ -175,7 +175,7 @@ async fn check_events_are_emitted_for_execute_returning_count_repeat_does_not_re
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 5, "{:?}", events);
+    assert_eq!(events.len(), 5, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::CacheQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -193,7 +193,7 @@ async fn check_events_are_emitted_for_load_repeat_does_not_repeat_cache() {
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 5, "{:?}", events);
+    assert_eq!(events.len(), 5, "{events:?}");
     assert_matches!(events[0], Event::StartQuery { .. });
     assert_matches!(events[1], Event::CacheQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -208,7 +208,7 @@ async fn check_events_transaction() {
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 6, "{:?}", events);
+    assert_eq!(events.len(), 6, "{events:?}");
     assert_matches!(events[0], Event::BeginTransaction { .. });
     assert_matches!(events[1], Event::StartQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -226,7 +226,7 @@ async fn check_events_transaction_error() {
         })
         .await;
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 6, "{:?}", events);
+    assert_eq!(events.len(), 6, "{events:?}");
     assert_matches!(events[0], Event::BeginTransaction { .. });
     assert_matches!(events[1], Event::StartQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -247,7 +247,7 @@ async fn check_events_transaction_nested() {
     .await
     .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 12, "{:?}", events);
+    assert_eq!(events.len(), 12, "{events:?}");
     assert_matches!(events[0], Event::BeginTransaction { .. });
     assert_matches!(events[1], Event::StartQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });
@@ -276,7 +276,7 @@ async fn check_events_transaction_builder() {
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
-    assert_eq!(events.len(), 6, "{:?}", events);
+    assert_eq!(events.len(), 6, "{events:?}");
     assert_matches!(events[0], Event::BeginTransaction { .. });
     assert_matches!(events[1], Event::StartQuery { .. });
     assert_matches!(events[2], Event::FinishQuery { .. });

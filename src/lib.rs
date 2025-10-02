@@ -5,12 +5,12 @@
 //! with the main diesel crate. It only provides async variants of core diesel traits,
 //! that perform actual io-work.
 //! This includes async counterparts the following traits:
-//! * [`diesel::prelude::RunQueryDsl`](https://docs.diesel.rs/2.0.x/diesel/prelude/trait.RunQueryDsl.html)
-//!    -> [`diesel_async::RunQueryDsl`](crate::RunQueryDsl)
-//! * [`diesel::connection::Connection`](https://docs.diesel.rs/2.0.x/diesel/connection/trait.Connection.html)
-//!    -> [`diesel_async::AsyncConnection`](crate::AsyncConnection)
-//! * [`diesel::query_dsl::UpdateAndFetchResults`](https://docs.diesel.rs/2.0.x/diesel/query_dsl/trait.UpdateAndFetchResults.html)
-//!    -> [`diesel_async::UpdateAndFetchResults`](crate::UpdateAndFetchResults)
+//! * [`diesel::prelude::RunQueryDsl`](https://docs.diesel.rs/2.3.x/diesel/prelude/trait.RunQueryDsl.html)
+//!   -> [`diesel_async::RunQueryDsl`](crate::RunQueryDsl)
+//! * [`diesel::connection::Connection`](https://docs.diesel.rs/2.3.x/diesel/connection/trait.Connection.html)
+//!   -> [`diesel_async::AsyncConnection`](crate::AsyncConnection)
+//! * [`diesel::query_dsl::UpdateAndFetchResults`](https://docs.diesel.rs/2.3.x/diesel/query_dsl/trait.UpdateAndFetchResults.html)
+//!   -> [`diesel_async::UpdateAndFetchResults`](crate::UpdateAndFetchResults)
 //!
 //! These traits closely mirror their diesel counter parts while providing async functionality.
 //!
@@ -65,6 +65,26 @@
 //! #     Ok(())
 //! # }
 //! ```
+//!
+//! ## Crate features:
+//!
+//! * `postgres`: Enables the [`AsyncPgConnection`] implementation
+//! * `mysql`: Enables the [`AsyncMysqlConnection`] implementation
+//! * `sqlite`: Enables the [`SyncConnectionWrapper`](crate::sync_connection_wrapper::SyncConnectionWrapper)
+//!   and everything required to work with SQLite
+//! * `sync-connection-wrapper`: Enables the
+//!   [`SyncConnectionWrapper`](crate::sync_connection_wrapper::SyncConnectionWrapper) which allows to
+//!   wrap sync connections from [`diesel`] into async connection wrapper
+//! * `async-connection-wrapper`: Enables the [`AsyncConnectionWrapper`](crate::async_connection_wrapper::AsyncConnectionWrapper)
+//!   which allows
+//!   to use connection implementations from this crate as sync [`diesel::Connection`]
+//! * `migrations`: Enables the [`AsyncMigrationHarness`] to execute migrations via
+//!   [`diesel_migrations`]
+//! * `pool`: Enables general support for connection pools
+//! * `r2d2`: Enables support for pooling via the [`r2d2`] crate
+//! * `bb8`: Enables support for pooling via the [`bb8`] crate
+//! * `mobc`: Enables support for pooling via the [`mobc`] crate
+//! * `deadpool`: Enables support for pooling via the [`deadpool`] crate
 
 #![warn(
     missing_docs,
@@ -89,6 +109,9 @@ use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 
 #[cfg(feature = "async-connection-wrapper")]
 pub mod async_connection_wrapper;
+mod deref_connection;
+#[cfg(feature = "migrations")]
+mod migrations;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -111,6 +134,9 @@ pub use self::pg::AsyncPgConnection;
 #[doc(inline)]
 pub use self::run_query_dsl::*;
 
+#[doc(inline)]
+#[cfg(feature = "migrations")]
+pub use self::migrations::AsyncMigrationHarness;
 #[doc(inline)]
 pub use self::transaction_manager::{AnsiTransactionManager, TransactionManager};
 

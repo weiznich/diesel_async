@@ -44,6 +44,10 @@ features = [
   "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
 ]
 
+[dependencies.diesel_migrations]
+version = "~2.3.0"
+optional = true
+
 [dev-dependencies]
 tokio = { version = "1.12.0", features = ["rt", "macros", "rt-multi-thread"] }
 cfg-if = "1"
@@ -73,6 +77,7 @@ postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
 sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
 sync-connection-wrapper = ["tokio/rt"]
 async-connection-wrapper = ["tokio/net", "tokio/rt"]
+migrations = ["diesel_migrations", "async-connection-wrapper", "tokio/rt-multi-thread"]
 pool = []
 r2d2 = ["pool", "diesel/r2d2"]
 bb8 = ["pool", "dep:bb8"]
@@ -95,10 +100,12 @@ features = [
   "async-connection-wrapper",
   "sync-connection-wrapper",
   "r2d2",
+  "migrations",
+  "tokio/macros",
 ]
 no-default-features = true
 rustc-args = ["--cfg", "docsrs"]
-rustdoc-args = ["--cfg", "docsrs"]
+rustdoc-args = ["--cfg", "docsrs", "-Z", "unstable-options", "--generate-link-to-definition"]
 
 [workspace]
 members = [
