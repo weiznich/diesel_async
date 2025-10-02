@@ -6,6 +6,10 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-10-02
+
+* Fix versions in the Readme
+
 ## [0.7.1] - 2025-10-02
 
 * Fix the docs.rs build
@@ -114,4 +118,5 @@ in the pool should be checked if they are still valid
 [0.6.1]: https://github.com/weiznich/diesel_async/compare/v0.6.0...v0.6.1
 [0.7.0]: https://github.com/weiznich/diesel_async/compare/v0.6.0...v0.7.0
 [0.7.1]: https://github.com/weiznich/diesel_async/compare/v0.7.0...v0.7.1
+[0.7.1]: https://github.com/weiznich/diesel_async/compare/v0.7.1...v0.7.2
 [Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.7.0...main

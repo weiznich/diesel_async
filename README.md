@@ -27,8 +27,8 @@ A normal project should use a setup similar to the following one:
 
 ```toml
 [dependencies]
-diesel = "2.1.0" # no backend features need to be enabled
-diesel-async = { version = "0.3.1", features = ["postgres"] }
+diesel = "2.3.0" # no backend features need to be enabled
+diesel-async = { version = "0.7.0", features = ["postgres"] }
 ```
 
 This allows to import the relevant traits from both crates:
