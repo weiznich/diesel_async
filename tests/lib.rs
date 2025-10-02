@@ -170,14 +170,13 @@ async fn postgres_cancel_token() {
 #[cfg(feature = "mysql")]
 #[tokio::test]
 async fn mysql_cancel_token() {
-    use std::time::Duration;
-
     use diesel::result::{DatabaseErrorKind, Error};
+    use std::time::Duration;
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
 
-    // execute a long-running query on a separate thread
-    let task = tokio::spawn(async move {
+    // execute a long-running query in a separate future
+    let query_future = async move {
         let conn = &mut connection().await;
         let token = conn.cancel_token();
 
@@ -187,28 +186,30 @@ async fn mysql_cancel_token() {
             .unwrap_or_else(|_| panic!("couldn't send token"));
 
         diesel::dsl::sql::<diesel::sql_types::Integer>("SELECT SLEEP(5)")
-            .load::<i32>(conn)
+            .get_result::<i32>(conn)
             .await
-    });
+    };
+    let cancel_future = async move {
+        // wait for the cancellation token to be sent
+        if let Ok(token) = receiver.await {
+            // give the query time to start before invoking the token
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            token.cancel_query().await.unwrap();
+        } else {
+            panic!("Failed to receive cancel token");
+        }
+    };
 
-    // wait for the cancellation token to be sent
-    if let Ok(token) = receiver.await {
-        // give the query time to start before invoking the token
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        token.cancel_query().await.unwrap();
-    }
+    let (task, _) = tokio::join!(query_future, cancel_future);
 
     // make sure the query task resulted in a cancellation error or a return value of 1:
-    match task.await.unwrap() {
-        Err(e) => match e {
-            Error::DatabaseError(DatabaseErrorKind::Unknown, v)
-                if v.message() == "Query execution was interrupted" => {}
-            _ => panic!("unexpected error: {:?}", e),
-        },
-        Ok(r) => match r[0] {
-            1 => {}
-            _ => panic!("query completed successfully without cancellation"),
-        },
+    match task {
+        Err(Error::DatabaseError(DatabaseErrorKind::Unknown, v))
+            if v.message() == "Query execution was interrupted" => {}
+        Err(e) => panic!("unexpected error: {:?}", e),
+        // mysql 8.4 returns 1 from a canceled sleep instead of an error
+        Ok(1) => {}
+        Ok(_) => panic!("query completed successfully without cancellation"),
     }
 }
 

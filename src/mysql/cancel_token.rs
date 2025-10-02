@@ -6,12 +6,12 @@ use crate::mysql::error_helper::ErrorHelper;
 /// The capability to request cancellation of in-progress queries on a
 /// connection.
 #[derive(Clone)]
-pub struct CancelToken {
+pub struct MysqlCancelToken {
     pub(crate) opts: Opts,
     pub(crate) kill_id: u32,
 }
 
-impl CancelToken {
+impl MysqlCancelToken {
     /// Attempts to cancel the in-progress query on the connection associated
     /// with this `CancelToken`.
     ///
@@ -22,7 +22,7 @@ impl CancelToken {
     /// cancellation request will reach the server before the query terminates
     /// normally, or that the connection associated with this token is still
     /// active.
-    pub async fn cancel_query(&self) -> Result<(), diesel::result::ConnectionError> {
+    pub async fn cancel_query(&self) -> diesel::result::ConnectionResult<()> {
         let builder = OptsBuilder::from_opts(self.opts.clone());
 
         let conn = mysql_async::Conn::new(builder).await.map_err(ErrorHelper)?;
