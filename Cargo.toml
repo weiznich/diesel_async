@@ -105,7 +105,6 @@ features = [
   "tokio/macros",
 ]
 no-default-features = true
-rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs", "-Z", "unstable-options", "--generate-link-to-definition"]
 
 [workspace]
