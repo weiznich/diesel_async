@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use diesel::QueryResult;
-use futures_core::{ready, TryFuture, TryStream};
+use futures_core::{TryFuture, TryStream};
 use futures_util::{TryFutureExt, TryStreamExt};
 
 // We use a custom future implementation here to erase some lifetimes
@@ -80,14 +80,23 @@ where
 
 /// Converts a stream into a future, only yielding the first element.
 /// Based on [`futures_util::stream::StreamFuture`].
-pub struct LoadNext<St> {
-    stream: Option<St>,
+///
+/// Consumes the entire stream to ensure proper cleanup before returning which is
+/// required to fix: https://github.com/weiznich/diesel_async/issues/269
+pub struct LoadNext<St>
+where
+    St: TryStream<Error = diesel::result::Error> + Unpin,
+{
+    future: futures_util::stream::TryCollect<St, Vec<St::Ok>>,
 }
 
-impl<St> LoadNext<St> {
+impl<St> LoadNext<St>
+where
+    St: TryStream<Error = diesel::result::Error> + Unpin,
+{
     pub(crate) fn new(stream: St) -> Self {
         Self {
-            stream: Some(stream),
+            future: stream.try_collect(),
         }
     }
 }
@@ -99,14 +108,15 @@ where
     type Output = QueryResult<St::Ok>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let first = {
-            let s = self.stream.as_mut().expect("polling LoadNext twice");
-            ready!(s.try_poll_next_unpin(cx))
-        };
-        self.stream = None;
-        match first {
-            Some(first) => Poll::Ready(first),
-            None => Poll::Ready(Err(diesel::result::Error::NotFound)),
+        match Pin::new(&mut self.future).poll(cx) {
+            Poll::Ready(Ok(results)) => {
+                match results.into_iter().next() {
+                    Some(first) => Poll::Ready(Ok(first)),
+                    None => Poll::Ready(Err(diesel::result::Error::NotFound)),
+                }
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
