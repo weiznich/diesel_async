@@ -109,12 +109,10 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.future).poll(cx) {
-            Poll::Ready(Ok(results)) => {
-                match results.into_iter().next() {
-                    Some(first) => Poll::Ready(Ok(first)),
-                    None => Poll::Ready(Err(diesel::result::Error::NotFound)),
-                }
-            }
+            Poll::Ready(Ok(results)) => match results.into_iter().next() {
+                Some(first) => Poll::Ready(Ok(first)),
+                None => Poll::Ready(Err(diesel::result::Error::NotFound)),
+            },
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Pending => Poll::Pending,
         }
