@@ -83,29 +83,27 @@ where
 ///
 /// Consumes the entire stream to ensure proper cleanup before returning which is
 /// required to fix: https://github.com/weiznich/diesel_async/issues/269
-pub struct LoadNext<St>
-where
-    St: TryStream<Error = diesel::result::Error> + Unpin,
-{
-    future: futures_util::stream::TryCollect<St, Vec<St::Ok>>,
+#[repr(transparent)]
+pub struct LoadNext<T: TryStreamExt> {
+    future: futures_util::stream::TryCollect<T, Vec<T::Ok>>,
 }
 
-impl<St> LoadNext<St>
+impl<T> LoadNext<T>
 where
-    St: TryStream<Error = diesel::result::Error> + Unpin,
+    T: TryStream<Error = diesel::result::Error> + Unpin,
 {
-    pub(crate) fn new(stream: St) -> Self {
+    pub(crate) fn new(stream: T) -> Self {
         Self {
             future: stream.try_collect(),
         }
     }
 }
 
-impl<St> Future for LoadNext<St>
+impl<T> Future for LoadNext<T>
 where
-    St: TryStream<Error = diesel::result::Error> + Unpin,
+    T: TryStream<Error = diesel::result::Error> + Unpin,
 {
-    type Output = QueryResult<St::Ok>;
+    type Output = QueryResult<T::Ok>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut self.future).poll(cx) {
