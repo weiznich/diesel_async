@@ -146,7 +146,7 @@ pub mod return_futures {
     ///
     /// This is essentially `impl Future<Output = QueryResult<U>>`
     pub type GetResult<'conn, 'query, Q: LoadQuery<'query, Conn, U>, Conn, U> =
-        utils::AndThen<Q::LoadFuture<'conn>, utils::LoadNext<Pin<Box<Q::Stream<'conn>>>>>;
+        utils::AndThen<Q::LoadFuture<'conn>, utils::LoadNext<Pin<Box<Q::Stream<'conn>>>, U>>;
 }
 
 /// Methods used to execute queries.

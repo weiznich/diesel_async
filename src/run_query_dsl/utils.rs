@@ -4,6 +4,7 @@ use std::task::{Context, Poll};
 
 use diesel::QueryResult;
 use futures_core::{TryFuture, TryStream};
+use futures_util::stream::TryCollect;
 use futures_util::{TryFutureExt, TryStreamExt};
 
 // We use a custom future implementation here to erase some lifetimes
@@ -84,29 +85,38 @@ where
 /// Consumes the entire stream to ensure proper cleanup before returning which is
 /// required to fix: https://github.com/weiznich/diesel_async/issues/269
 #[repr(transparent)]
-pub struct LoadNext<T: TryStreamExt> {
-    future: futures_util::stream::TryCollect<T, Vec<T::Ok>>,
+pub struct LoadNext<F, T>
+where
+    F: TryStream<Ok = T, Error = diesel::result::Error>,
+{
+    future: TryCollect<F, Vec<T>>,
 }
 
-impl<T> LoadNext<T>
+impl<F, T> LoadNext<F, T>
 where
-    T: TryStream<Error = diesel::result::Error> + Unpin,
+    F: TryStream<Ok = T, Error = diesel::result::Error>,
 {
-    pub(crate) fn new(stream: T) -> Self {
+    pub(crate) fn new(stream: F) -> Self {
         Self {
             future: stream.try_collect(),
         }
     }
 }
 
-impl<T> Future for LoadNext<T>
+impl<F, T> Future for LoadNext<F, T>
 where
-    T: TryStream<Error = diesel::result::Error> + Unpin,
+    F: TryStream<Ok = T, Error = diesel::result::Error>,
+    TryCollect<F, Vec<T>>: Future<Output = Result<Vec<T>, diesel::result::Error>>,
 {
-    type Output = QueryResult<T::Ok>;
+    type Output = QueryResult<T>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.future).poll(cx) {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match unsafe {
+            // SAFETY: This projects pinning to the only inner field
+            self.map_unchecked_mut(|s| &mut s.future)
+        }
+        .poll(cx)
+        {
             Poll::Ready(Ok(results)) => match results.into_iter().next() {
                 Some(first) => Poll::Ready(Ok(first)),
                 None => Poll::Ready(Err(diesel::result::Error::NotFound)),
