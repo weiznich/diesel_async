@@ -6,6 +6,10 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.7.4] - 2025-11-07
+
+* Fixed an issue with dropping uncached mysql statements
+
 ## [0.7.3] - 2025-10-05
 
 * Another docs.rs build fix
