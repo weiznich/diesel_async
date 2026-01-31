@@ -31,10 +31,10 @@ impl User {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::var("DATABASE_URL").expect("Env var `DATABASE_URL` not set");
-    let mut conn = AsyncPgConnection::establish(&db_url).await?;
+    let conn = AsyncPgConnection::establish(&db_url).await?;
 
-    let all_users = User::query().load(&mut conn);
-    let single_user = User::query().find(1).get_result(&mut conn);
+    let all_users = User::query().load(&mut &conn);
+    let single_user = User::query().find(1).get_result(&mut &conn);
 
     let (all_users, single_user) = tokio::try_join!(all_users, single_user)?;
     println!("All users: {all_users:?}");
