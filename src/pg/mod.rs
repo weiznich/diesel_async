@@ -95,13 +95,13 @@ const FAKE_OID: u32 = 0;
 /// #
 /// # async fn run_test() -> QueryResult<()> {
 /// #     use diesel::sql_types::{Text, Integer};
-/// #     let conn = &mut establish_connection().await;
+/// #     let conn = establish_connection().await;
 ///       let q1 = diesel::select(1_i32.into_sql::<Integer>());
 ///       let q2 = diesel::select(2_i32.into_sql::<Integer>());
 ///
 ///       // construct multiple futures for different queries
-///       let f1 = q1.get_result::<i32>(conn);
-///       let f2 = q2.get_result::<i32>(conn);
+///       let f1 = q1.get_result::<i32>(&mut &conn);
+///       let f2 = q2.get_result::<i32>(&mut &conn);
 ///
 ///       // wait on both results
 ///       let res = futures_util::try_join!(f1, f2)?;
