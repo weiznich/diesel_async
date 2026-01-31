@@ -138,19 +138,20 @@ async fn postgres_cancel_token() {
 
     use diesel::result::{DatabaseErrorKind, Error};
 
-    let conn = &mut connection().await;
+    let mut conn = connection().await;
 
     let token = conn.cancel_token();
 
     // execute a query that runs for a long time
-    let long_running_query = diesel::select(pg_sleep(5.0)).execute(conn);
-
-    // execute the query elsewhere...
-    let task = tokio::spawn(async move {
-        long_running_query
+    let long_running_query = async move {
+        diesel::select(pg_sleep(5.0))
+            .execute(&mut conn)
             .await
             .expect_err("query should have been canceled.")
-    });
+    };
+
+    // execute the query elsewhere...
+    let task = tokio::spawn(long_running_query);
 
     // let the task above have some time to actually start...
     tokio::time::sleep(Duration::from_millis(500)).await;

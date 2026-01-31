@@ -208,8 +208,9 @@ impl SimpleAsyncConnection for &AsyncPgConnection {
 }
 
 impl AsyncConnectionCore for AsyncPgConnection {
-    type LoadFuture<'conn, 'query> = BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
-    type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
+    // The returned future must not outlive the connection it borrows.
+    type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
+    type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
     type Stream<'conn, 'query> = BoxStream<'static, QueryResult<PgRow>>;
     type Row<'conn, 'query> = PgRow;
     type Backend = diesel::pg::Pg;
@@ -219,7 +220,10 @@ impl AsyncConnectionCore for AsyncPgConnection {
         T: AsQuery + 'query,
         T::Query: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        AsyncConnectionCore::load(&mut &*self, source)
+        let query = source.as_query();
+        let load_future = self.with_prepared_statement(query, load_prepared);
+
+        self.run_with_connection_future(load_future)
     }
 
     fn execute_returning_count<'conn, 'query, T>(
@@ -229,22 +233,19 @@ impl AsyncConnectionCore for AsyncPgConnection {
     where
         T: QueryFragment<Self::Backend> + QueryId + 'query,
     {
-        AsyncConnectionCore::execute_returning_count(&mut &*self, source)
+        let execute = self.with_prepared_statement(source, execute_prepared);
+        self.run_with_connection_future(execute)
     }
 }
 
-impl AsyncConnectionCore for &AsyncPgConnection {
-    type LoadFuture<'conn, 'query> =
-        <AsyncPgConnection as AsyncConnectionCore>::LoadFuture<'conn, 'query>;
-
-    type ExecuteFuture<'conn, 'query> =
-        <AsyncPgConnection as AsyncConnectionCore>::ExecuteFuture<'conn, 'query>;
-
-    type Stream<'conn, 'query> = <AsyncPgConnection as AsyncConnectionCore>::Stream<'conn, 'query>;
-
-    type Row<'conn, 'query> = <AsyncPgConnection as AsyncConnectionCore>::Row<'conn, 'query>;
-
-    type Backend = <AsyncPgConnection as AsyncConnectionCore>::Backend;
+// Enable query pipelining via shared references while binding futures
+// to the lifetime of the borrowed connection.
+impl<'a> AsyncConnectionCore for &'a AsyncPgConnection {
+    type LoadFuture<'conn, 'query> = BoxFuture<'a, QueryResult<Self::Stream<'conn, 'query>>>;
+    type ExecuteFuture<'conn, 'query> = BoxFuture<'a, QueryResult<usize>>;
+    type Stream<'conn, 'query> = BoxStream<'static, QueryResult<PgRow>>;
+    type Row<'conn, 'query> = PgRow;
+    type Backend = diesel::pg::Pg;
 
     fn load<'conn, 'query, T>(&'conn mut self, source: T) -> Self::LoadFuture<'conn, 'query>
     where
@@ -542,8 +543,8 @@ impl AsyncPgConnection {
         use crate::run_query_dsl::RunQueryDsl;
 
         futures_util::future::try_join(
-            diesel::sql_query("SET TIME ZONE 'UTC'").execute(self),
-            diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'").execute(self),
+            diesel::sql_query("SET TIME ZONE 'UTC'").execute(&mut &*self),
+            diesel::sql_query("SET CLIENT_ENCODING TO 'UTF8'").execute(&mut &*self),
         )
         .await?;
         Ok(())
@@ -1107,15 +1108,15 @@ mod tests {
         let database_url =
             std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in order to run tests");
 
-        let mut conn = crate::AsyncPgConnection::establish(&database_url)
+        let conn = crate::AsyncPgConnection::establish(&database_url)
             .await
             .unwrap();
 
         let q1 = diesel::select(1_i32.into_sql::<Integer>());
         let q2 = diesel::select(2_i32.into_sql::<Integer>());
 
-        let f1 = q1.get_result::<i32>(&mut conn);
-        let f2 = q2.get_result::<i32>(&mut conn);
+        let f1 = q1.get_result::<i32>(&mut &conn);
+        let f2 = q2.get_result::<i32>(&mut &conn);
 
         let (r1, r2) = try_join(f1, f2).await.unwrap();
 
