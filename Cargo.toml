@@ -115,3 +115,6 @@ members = [
   "examples/postgres/run-pending-migrations-with-rustls",
   "examples/sync-wrapper",
 ]
+
+[patch.crates-io]
+diesel =  { git = "https://github.com/eakoli/diesel/", branch = "feat/run-query-dsl-marker-trait" }
