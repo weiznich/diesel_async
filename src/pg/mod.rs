@@ -165,10 +165,10 @@ const FAKE_OID: u32 = 0;
 ///
 /// [tokio_postgres_rustls]: https://docs.rs/tokio-postgres-rustls/0.12.0/tokio_postgres_rustls/
 pub struct AsyncPgConnection {
-    conn: Arc<tokio_postgres::Client>,
-    stmt_cache: Arc<Mutex<StatementCache<diesel::pg::Pg, Statement>>>,
-    transaction_state: Arc<Mutex<AnsiTransactionManager>>,
-    metadata_cache: Arc<Mutex<PgMetadataCache>>,
+    conn: tokio_postgres::Client,
+    stmt_cache: Mutex<StatementCache<diesel::pg::Pg, Statement>>,
+    transaction_state: Mutex<AnsiTransactionManager>,
+    metadata_cache: Mutex<PgMetadataCache>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     notification_rx: Option<mpsc::UnboundedReceiver<QueryResult<diesel::pg::PgNotification>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
@@ -305,14 +305,7 @@ impl AsyncConnection for AsyncPgConnection {
     }
 
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
-        // there should be no other pending future when this is called
-        // that means there is only one instance of this arc and
-        // we can simply access the inner data
-        if let Some(tm) = Arc::get_mut(&mut self.transaction_state) {
-            tm.get_mut()
-        } else {
-            panic!("Cannot access shared transaction state")
-        }
+        self.transaction_state.get_mut()
     }
 
     fn instrumentation(&mut self) -> &mut dyn Instrumentation {
@@ -331,14 +324,7 @@ impl AsyncConnection for AsyncPgConnection {
     }
 
     fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
-        // there should be no other pending future when this is called
-        // that means there is only one instance of this arc and
-        // we can simply access the inner data
-        if let Some(cache) = Arc::get_mut(&mut self.stmt_cache) {
-            cache.get_mut().set_cache_size(size)
-        } else {
-            panic!("Cannot access shared statement cache")
-        }
+        self.stmt_cache.get_mut().set_cache_size(size)
     }
 }
 
@@ -351,7 +337,7 @@ impl Drop for AsyncPgConnection {
 }
 
 async fn load_prepared(
-    conn: Arc<tokio_postgres::Client>,
+    conn: &tokio_postgres::Client,
     stmt: Statement,
     binds: Vec<ToSqlHelper>,
 ) -> QueryResult<BoxStream<'static, QueryResult<PgRow>>> {
@@ -364,7 +350,7 @@ async fn load_prepared(
 }
 
 async fn execute_prepared(
-    conn: Arc<tokio_postgres::Client>,
+    conn: &tokio_postgres::Client,
     stmt: Statement,
     binds: Vec<ToSqlHelper>,
 ) -> QueryResult<usize> {
@@ -373,7 +359,7 @@ async fn execute_prepared(
         .map(|b| b as &(dyn ToSql + Sync))
         .collect::<Vec<_>>();
 
-    let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
+    let res = tokio_postgres::Client::execute(conn, &stmt, &binds as &[_])
         .await
         .map_err(ErrorHelper)?;
     res.try_into()
@@ -397,13 +383,13 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-fn prepare_statement_helper(
-    conn: Arc<tokio_postgres::Client>,
+fn prepare_statement_helper<'conn>(
+    conn: &'conn tokio_postgres::Client,
     sql: &str,
     _is_for_cache: PrepareForCache,
     metadata: &[PgTypeMetadata],
 ) -> CallbackHelper<
-    impl Future<Output = QueryResult<(Statement, Arc<tokio_postgres::Client>)>> + Send,
+    impl Future<Output = QueryResult<(Statement, &'conn tokio_postgres::Client)>> + Send,
 > {
     let bind_types = metadata
         .iter()
@@ -519,10 +505,10 @@ impl AsyncPgConnection {
         instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
-            conn: Arc::new(conn),
-            stmt_cache: Arc::new(Mutex::new(StatementCache::new())),
-            transaction_state: Arc::new(Mutex::new(AnsiTransactionManager::default())),
-            metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
+            conn,
+            stmt_cache: Mutex::new(StatementCache::new()),
+            transaction_state: Mutex::new(AnsiTransactionManager::default()),
+            metadata_cache: Mutex::new(PgMetadataCache::new()),
             connection_future,
             notification_rx,
             shutdown_channel,
@@ -559,9 +545,9 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement<'a, T, F, R>(
-        &self,
+        &'a self,
         query: T,
-        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
+        callback: fn(&'a tokio_postgres::Client, Statement, Vec<ToSqlHelper>) -> F,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId,
@@ -594,8 +580,8 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement_after_sql_built<'a, F, R>(
-        &self,
-        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
+        &'a self,
+        callback: fn(&'a tokio_postgres::Client, Statement, Vec<ToSqlHelper>) -> F,
         is_safe_to_cache_prepared: QueryResult<bool>,
         query_id: Option<std::any::TypeId>,
         to_sql_result: QueryResult<()>,
@@ -606,10 +592,10 @@ impl AsyncPgConnection {
         F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
-        let raw_connection = self.conn.clone();
-        let stmt_cache = self.stmt_cache.clone();
-        let metadata_cache = self.metadata_cache.clone();
-        let tm = self.transaction_state.clone();
+        let raw_connection = &self.conn;
+        let stmt_cache = &self.stmt_cache;
+        let metadata_cache = &self.metadata_cache;
+        let tm = &self.transaction_state;
         let instrumentation = self.instrumentation.clone();
         let BindData {
             collect_bind_result,
@@ -647,7 +633,7 @@ impl AsyncPgConnection {
                         type_metadata
                     } else {
                         let type_metadata =
-                            lookup_type(schema.clone(), lookup_type_name.clone(), &raw_connection)
+                            lookup_type(schema.clone(), lookup_type_name.clone(), raw_connection)
                                 .await?;
                         metadata_cache.store_type(cache_key, type_metadata);
 
@@ -689,7 +675,7 @@ impl AsyncPgConnection {
                         &helper,
                         &Pg,
                         &bind_collector.metadata,
-                        raw_connection.clone(),
+                        raw_connection,
                         prepare_statement_helper,
                         &mut move |event: InstrumentationEvent<'_>| {
                             // we wrap this lock into another callback to prevent locking
