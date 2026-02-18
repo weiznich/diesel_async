@@ -32,7 +32,7 @@ mysql_common = { version = "0.35.3", optional = true, default-features = false }
 
 bb8 = { version = "0.9", optional = true }
 async-trait = { version = "0.1.66", optional = true }
-deadpool = { version = "0.12", optional = true, default-features = false, features = [
+deadpool = { version = "0.13", optional = true, default-features = false, features = [
   "managed",
 ] }
 mobc = { version = ">=0.7,<0.10", optional = true }
