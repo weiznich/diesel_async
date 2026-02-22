@@ -14,6 +14,7 @@ rust-version = "1.84.0"
 include = ["README.md", "src/**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [dependencies]
+bytes = "1.11.1"
 futures-core = "0.3.17"
 futures-channel = { version = "0.3.17", default-features = false, features = [
   "std",
@@ -106,6 +107,9 @@ features = [
 ]
 no-default-features = true
 rustdoc-args = ["--cfg", "docsrs", "-Z", "unstable-options", "--generate-link-to-definition"]
+
+[patch.crates-io]
+diesel = { git = "https://github.com/sinasab/diesel", branch = "sina/export-CopyFromExpression" }
 
 [workspace]
 members = [

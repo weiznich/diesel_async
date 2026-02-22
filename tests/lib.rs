@@ -5,6 +5,8 @@ use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
 
 #[cfg(feature = "postgres")]
+mod copy;
+#[cfg(feature = "postgres")]
 mod custom_types;
 mod instrumentation;
 #[cfg(feature = "migrations")]
