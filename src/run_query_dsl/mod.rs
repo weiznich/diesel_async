@@ -6,7 +6,7 @@ use diesel::query_builder::IntoUpdateTarget;
 use diesel::result::QueryResult;
 use diesel::AsChangeset;
 use futures_core::future::BoxFuture;
-#[cfg(any(feature = "mysql", feature = "postgres"))]
+#[cfg(any(feature = "mysql", feature = "postgres", feature = "sqlite"))]
 use futures_util::FutureExt;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use std::future::Future;
@@ -737,6 +737,45 @@ where
 impl<'b, Changes, Output, Tab, V> UpdateAndFetchResults<Changes, Output>
     for crate::AsyncPgConnection
 where
+    Output: Send + 'static,
+    Changes:
+        Copy + AsChangeset<Target = Tab> + Send + diesel::associations::Identifiable<Table = Tab>,
+    Tab: diesel::Table + diesel::query_dsl::methods::FindDsl<Changes::Id> + 'b,
+    diesel::dsl::Find<Tab, Changes::Id>: IntoUpdateTarget<Table = Tab, WhereClause = V>,
+    diesel::query_builder::UpdateStatement<Tab, V, Changes::Changeset>:
+        diesel::query_builder::AsQuery,
+    diesel::dsl::Update<Changes, Changes>: methods::LoadQuery<'b, Self, Output>,
+    V: Send + 'b,
+    Changes::Changeset: Send + 'b,
+    Tab::FromClause: Send,
+{
+    fn update_and_fetch<'conn, 'changes>(
+        &'conn mut self,
+        changeset: Changes,
+    ) -> BoxFuture<'changes, QueryResult<Output>>
+    where
+        Changes: 'changes,
+        Changes::Changeset: 'changes,
+        'conn: 'changes,
+        Self: 'changes,
+    {
+        async move {
+            diesel::update(changeset)
+                .set(changeset)
+                .get_result(self)
+                .await
+        }
+        .boxed()
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl<'b, Changes, Output, Tab, V, C, B> UpdateAndFetchResults<Changes, Output>
+    for crate::sync_connection_wrapper::SyncConnectionWrapper<C, B>
+where
+    crate::sync_connection_wrapper::SyncConnectionWrapper<C, B>: AsyncConnectionCore,
+    C: 'static,
+    B: 'static,
     Output: Send + 'static,
     Changes:
         Copy + AsChangeset<Target = Tab> + Send + diesel::associations::Identifiable<Table = Tab>,
