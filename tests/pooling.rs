@@ -105,3 +105,30 @@ async fn save_changes_mobc() {
         assert_eq!(u2.name, "Jane");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(feature = "sync-connection-wrapper", feature = "deadpool"))]
+async fn cancel_blocking_task_deadpool() {
+    use diesel_async::pooled_connection::deadpool::Pool;
+    use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+
+    let db_url = std::env::var("DATABASE_URL").unwrap();
+
+    let config = AsyncDieselConnectionManager::<super::TestConnection>::new(db_url);
+    let pool = Pool::builder(config).max_size(1).build().unwrap();
+    let pool_clone = pool.clone();
+
+    let handle = tokio::spawn(async move {
+        let mut conn = pool_clone.get().await.unwrap();
+        conn.spawn_blocking(|_| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    handle.abort();
+    let _conn = pool.get().await.unwrap();
+}

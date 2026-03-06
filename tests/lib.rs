@@ -214,6 +214,19 @@ async fn mysql_cancel_token() {
     }
 }
 
+#[cfg(feature = "sync-connection-wrapper")]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_blocking_task() {
+    let mut conn = connection().await;
+    let future = conn.spawn_blocking(|_| {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        Ok(())
+    });
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    std::mem::drop(future);
+    conn.transaction_state();
+}
+
 #[cfg(feature = "postgres")]
 async fn setup(connection: &mut TestConnection) {
     diesel::sql_query(
