@@ -522,34 +522,36 @@ mod implementation {
     }
 
     #[cfg(feature = "tokio")]
-    #[pin_project::pin_project(PinnedDrop)]
+    use std::pin::Pin;
+
+    #[cfg(feature = "tokio")]
     /// Wrapper around a task that makes sure it finishes before the Future gets cancelled
     struct CancelWrapper<R> {
         handle: tokio::runtime::Handle,
-        #[pin]
         future: tokio::task::JoinHandle<R>,
     }
 
+    #[cfg(feature = "tokio")]
     impl<R> std::future::Future for CancelWrapper<R> {
         type Output = Result<R, tokio::task::JoinError>;
 
         fn poll(
-            self: std::pin::Pin<&mut Self>,
+            self: Pin<&mut Self>,
             cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Self::Output> {
-            self.project().future.poll(cx)
+            let future = Pin::new(&mut self.get_mut().future);
+            future.poll(cx)
         }
     }
 
     #[cfg(feature = "tokio")]
-    #[pin_project::pinned_drop]
-    impl<R> PinnedDrop for CancelWrapper<R> {
-        fn drop(self: std::pin::Pin<&mut Self>) {
-            let this = self.project();
-            if !this.future.is_finished() {
+    impl<R> Drop for CancelWrapper<R> {
+        fn drop(&mut self) {
+            let future = Pin::new(&mut self.future);
+            if !future.is_finished() {
                 tokio::task::block_in_place(|| {
                     // we don't care about the result, just make sure the task is finished before continuing
-                    let _ = this.handle.block_on(this.future);
+                    let _ = self.handle.block_on(future);
                 });
             }
         }
