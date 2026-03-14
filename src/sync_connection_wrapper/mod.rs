@@ -495,8 +495,14 @@ mod implementation {
             R: Send + 'static,
         {
             let fut = match self {
-                Tokio::Handle(handle) => handle.spawn_blocking(task),
-                Tokio::Runtime(runtime) => runtime.spawn_blocking(task),
+                Tokio::Handle(handle) => CancelWrapper {
+                    future: handle.spawn_blocking(task),
+                    handle: handle.clone(),
+                },
+                Tokio::Runtime(runtime) => CancelWrapper {
+                    future: runtime.spawn_blocking(task),
+                    handle: runtime.handle().clone(),
+                },
             };
 
             fut.map_err(Box::from).boxed()
@@ -511,6 +517,42 @@ mod implementation {
                     .unwrap();
 
                 Tokio::Runtime(runtime)
+            }
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    use std::pin::Pin;
+
+    #[cfg(feature = "tokio")]
+    /// Wrapper around a task that makes sure it finishes before the Future gets cancelled
+    struct CancelWrapper<R> {
+        handle: tokio::runtime::Handle,
+        future: tokio::task::JoinHandle<R>,
+    }
+
+    #[cfg(feature = "tokio")]
+    impl<R> std::future::Future for CancelWrapper<R> {
+        type Output = Result<R, tokio::task::JoinError>;
+
+        fn poll(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            let future = Pin::new(&mut self.get_mut().future);
+            future.poll(cx)
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    impl<R> Drop for CancelWrapper<R> {
+        fn drop(&mut self) {
+            let future = Pin::new(&mut self.future);
+            if !future.is_finished() {
+                tokio::task::block_in_place(|| {
+                    // we don't care about the result, just make sure the task is finished before continuing
+                    let _ = self.handle.block_on(future);
+                });
             }
         }
     }
