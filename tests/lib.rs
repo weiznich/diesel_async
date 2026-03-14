@@ -218,11 +218,13 @@ async fn mysql_cancel_token() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cancel_blocking_task() {
     let mut conn = connection().await;
+    let (tx, rx) = tokio::sync::oneshot::channel();
     let future = conn.spawn_blocking(|_| {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
         Ok(())
     });
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    rx.await.unwrap();
     std::mem::drop(future);
     conn.transaction_state();
 }

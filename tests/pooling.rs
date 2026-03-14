@@ -111,24 +111,27 @@ async fn save_changes_mobc() {
 async fn cancel_blocking_task_deadpool() {
     use diesel_async::pooled_connection::deadpool::Pool;
     use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+    use tokio::sync::oneshot;
 
     let db_url = std::env::var("DATABASE_URL").unwrap();
 
     let config = AsyncDieselConnectionManager::<super::TestConnection>::new(db_url);
     let pool = Pool::builder(config).max_size(1).build().unwrap();
     let pool_clone = pool.clone();
+    let (tx, rx) = oneshot::channel();
 
     let handle = tokio::spawn(async move {
         let mut conn = pool_clone.get().await.unwrap();
         conn.spawn_blocking(|_| {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
             Ok(())
         })
         .await
         .unwrap();
     });
 
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    rx.await.unwrap();
     handle.abort();
     let _conn = pool.get().await.unwrap();
 }
