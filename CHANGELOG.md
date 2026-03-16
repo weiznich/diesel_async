@@ -7,6 +7,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 ## [Unreleased]
 
 * Added support for UpdateAndFetchResults for `SyncConnectionWrapper`, allowing to use `save_changes`
+* Added support for PostgreSQL `COPY FROM` via `AsyncExecuteCopyFromDsl`
 
 ## [0.7.4] - 2025-11-07
 

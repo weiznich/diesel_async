@@ -38,6 +38,7 @@ use tokio_postgres::Statement;
 
 pub use self::transaction_builder::TransactionBuilder;
 
+pub mod copy;
 mod error_helper;
 mod row;
 mod serialize;
@@ -770,6 +771,35 @@ impl AsyncPgConnection {
                 rx.recv().await.map(move |item| (item, rx))
             })),
         }
+    }
+
+    /// Executes a `COPY FROM STDIN` statement and returns a sink that allows writing the data.
+    #[doc(hidden)]
+    pub async fn copy_in(
+        &mut self,
+        statement: &str,
+    ) -> QueryResult<tokio_postgres::CopyInSink<bytes::Bytes>> {
+        self.record_instrumentation(InstrumentationEvent::start_query(&StrQueryHelper::new(
+            statement,
+        )));
+        let connection_future = self.connection_future.as_ref().map(|rx| rx.resubscribe());
+        let copy_in_future = self
+            .conn
+            .copy_in(statement)
+            .map_err(ErrorHelper)
+            .map_err(Into::into);
+
+        let r = drive_future(connection_future, copy_in_future).await;
+
+        let r = {
+            let mut transaction_manager = self.transaction_state.lock().await;
+            update_transaction_manager_status(r, &mut transaction_manager)
+        };
+        self.record_instrumentation(InstrumentationEvent::finish_query(
+            &StrQueryHelper::new(statement),
+            r.as_ref().err(),
+        ));
+        r
     }
 }
 

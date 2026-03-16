@@ -14,6 +14,7 @@ rust-version = "1.84.0"
 include = ["README.md", "src/**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [dependencies]
+bytes = "1.11.1"
 futures-core = "0.3.17"
 futures-channel = { version = "0.3.17", default-features = false, features = [
   "std",
@@ -75,7 +76,7 @@ mysql = [
   "futures-channel",
   "tokio",
 ]
-postgres = ["diesel/postgres_backend", "tokio-postgres", "tokio", "tokio/rt"]
+postgres = ["diesel/postgres_backend", "diesel/hashbrown", "tokio-postgres", "tokio", "tokio/rt"]
 sqlite = ["diesel/sqlite", "sync-connection-wrapper"]
 sync-connection-wrapper = ["tokio/rt-multi-thread"]
 async-connection-wrapper = ["tokio/net", "tokio/rt"]
@@ -108,11 +109,15 @@ features = [
 no-default-features = true
 rustdoc-args = ["--cfg", "docsrs", "-Z", "unstable-options", "--generate-link-to-definition"]
 
+[patch.crates-io]
+diesel = { git = "https://github.com/sinasab/diesel", branch = "sina/export-CopyFromExpression" }
+
 [workspace]
 members = [
   ".",
   "examples/postgres/pipelining",
   "examples/postgres/pooled-with-rustls",
   "examples/postgres/run-pending-migrations-with-rustls",
+  "examples/postgres/copy-from",
   "examples/sync-wrapper",
 ]
