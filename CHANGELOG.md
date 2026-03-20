@@ -6,7 +6,12 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-20
+
 * Added support for UpdateAndFetchResults for `SyncConnectionWrapper`, allowing to use `save_changes`
+* Bumped supported deadpool version to 0.13
+* Fixed a bug with postgres query pipelining that can cause panics
+* Fixed a bug with the `SyncConnectionWrapper` that can cause panics if the future is dropped before completion
 
 ## [0.7.4] - 2025-11-07
 
@@ -130,4 +135,6 @@ in the pool should be checked if they are still valid
 [0.7.1]: https://github.com/weiznich/diesel_async/compare/v0.7.0...v0.7.1
 [0.7.2]: https://github.com/weiznich/diesel_async/compare/v0.7.1...v0.7.2
 [0.7.3]: https://github.com/weiznich/diesel_async/compare/v0.7.2...v0.7.3
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.7.0...main
+[0.7.4]: https://github.com/weiznich/diesel_async/compare/v0.7.3...v0.7.4
+[0.8.0]: https://github.com/weiznich/diesel_async/compare/v0.7.4...v0.8.0
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.8.0...main
