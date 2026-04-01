@@ -1,9 +1,9 @@
+use crate::transaction_manager::AsyncFunc;
 use crate::{AnsiTransactionManager, AsyncConnection, TransactionManager};
 use diesel::backend::Backend;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, QueryBuilder, QueryFragment};
 use diesel::QueryResult;
-use scoped_futures::ScopedBoxFuture;
 
 /// Used to build a transaction, specifying additional details.
 ///
@@ -67,7 +67,7 @@ where
     /// #     )").execute(conn).await?;
     /// conn.build_transaction()
     ///     .read_only()
-    ///     .run::<_, diesel::result::Error, _>(|conn| Box::pin(async move {
+    ///     .run::<_, diesel::result::Error, _>(async |conn| {
     ///         let read_attempt = users.select(name).load::<String>(conn).await;
     ///         assert!(read_attempt.is_ok());
     ///
@@ -78,7 +78,7 @@ where
     ///         assert!(write_attempt.is_err());
     ///
     ///         Ok(())
-    ///     }) as _).await?;
+    ///     }).await?;
     /// #     sql_query("DROP TABLE users_for_read_only").execute(conn).await?;
     /// #     Ok(())
     /// # }
@@ -112,7 +112,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .read_write()
-    ///     .run(|conn| Box::pin( async move {
+    ///     .run(async |conn| {
     /// #         sql_query("CREATE TABLE IF NOT EXISTS users (
     /// #             id SERIAL PRIMARY KEY,
     /// #             name TEXT NOT NULL
@@ -130,8 +130,7 @@ where
     /// #       /*
     ///         Ok(())
     /// #       */
-    ///     }) as _)
-    ///     .await
+    ///     }).await
     /// # }
     /// ```
     pub fn read_write(mut self) -> Self {
@@ -156,7 +155,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .deferrable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }))
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -185,7 +184,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .not_deferrable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -214,7 +213,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .read_committed()
-    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -240,7 +239,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .repeatable_read()
-    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -266,7 +265,7 @@ where
     /// #     let conn = &mut connection_no_transaction().await;
     /// conn.build_transaction()
     ///     .serializable()
-    ///     .run(|conn| Box::pin(async { Ok(()) }) as _)
+    ///     .run(async |conn| Ok(()) )
     ///     .await
     /// # }
     /// ```
@@ -288,7 +287,10 @@ where
     /// as it contains a uncommitted unabortable open transaction.
     pub async fn run<'b, T, E, F>(&mut self, f: F) -> Result<T, E>
     where
-        F: for<'r> FnOnce(&'r mut C) -> ScopedBoxFuture<'b, 'r, Result<T, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut C) -> Result<T, E>
+            + AsyncFunc<&'r mut C, Result<T, E>, Fut: Send>
+            + Send
+            + 'a,
         T: 'b,
         E: From<diesel::result::Error> + 'b,
     {

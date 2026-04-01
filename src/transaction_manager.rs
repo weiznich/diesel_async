@@ -5,12 +5,47 @@ use diesel::connection::{
 };
 use diesel::result::Error;
 use diesel::QueryResult;
-use scoped_futures::ScopedBoxFuture;
 use std::borrow::Cow;
 use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// A helper trait to allow us asserting additional bounds on `AsyncFnOnce`
+/// Especially this lets us assert bounds on the future returned by the closure
+/// while still maintaining working type inference for the closure
+///
+/// This mostly exists for the following reasons:
+///
+/// * `AsyncFnOnce::CallOnceFuture` is not stable, so you cannot assert only with `AsyncFnOnce` that
+///   the returned future is `Send`
+/// * Only using `FnOnce(T) -> impl Future` doesn't work as you cannot use `impl Future` in that position
+/// * Using `F: FnOnce(T) -> Fut, Fut: Future<…>` doesn't work as you run into diverging lifetimes,
+///   as you essentially need to reuse the higher ranked lifetime from the closure to also restrict
+///   the lifetime of the returned future
+/// * Using a `trait Func<T>: FnOnce(T) -> <Self as Func<T>::Output> { type Output }` allows us
+///   to restrict the lifetime and bounds (like `Future` and `Send`) on the output type of the closure
+///   but then fails in type inference due to rustc bugs. You get unhelpful errors like
+///   `implementation of `FnOnce` is not general enough`, this can be side stepped by putting
+///   types on the calling side of the closure, which is not that nice API wise
+///
+/// This workaround is still not optimal as it still requires us to have this trait and show
+/// it as public bound. We somewhat try to avoid confusing users there by having an additional
+/// `AsyncFnOnce(T) -> R` bound at the calling side that hopefully will show up in rustdoc
+/// as well and hopefully guides the user to do the "right thing"
+pub trait AsyncFunc<T, R>:
+    AsyncFnOnce(T) -> R + FnOnce(T) -> <Self as AsyncFunc<T, R>>::Fut
+{
+    type Fut: Future<Output = R>;
+}
+
+impl<F, T, Fut, R> AsyncFunc<T, R> for F
+where
+    F: AsyncFnOnce(T) -> R + FnOnce(T) -> Fut,
+    Fut: Future<Output = R>,
+{
+    type Fut = Fut;
+}
 
 use crate::AsyncConnection;
 // TODO: refactor this to share more code with diesel
@@ -62,7 +97,10 @@ pub trait TransactionManager<Conn: AsyncConnection>: Send {
         callback: F,
     ) -> impl Future<Output = Result<R, E>> + Send + 'conn
     where
-        F: for<'r> FnOnce(&'r mut Conn) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Conn) -> Result<R, E>
+            + AsyncFunc<&'r mut Conn, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: From<Error> + Send,
         R: Send,
         'a: 'conn,
