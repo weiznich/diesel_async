@@ -6,6 +6,11 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 ## [Unreleased]
 
+* Change all transaction related functions to accept an real async closure instead of 
+  the scoped boxed variant. This change requires adujsting all call sides of transaction 
+  based functions from `conn.transaction(|conn| async move {/* your code */}.scoped_boxed())`
+  to `conn.transaction(async |conn| /* your code */)`
+
 ## [0.8.0] - 2026-03-20
 
 * Added support for UpdateAndFetchResults for `SyncConnectionWrapper`, allowing to use `save_changes`

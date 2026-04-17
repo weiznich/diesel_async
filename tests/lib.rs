@@ -1,7 +1,6 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
-use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
 
 #[cfg(feature = "postgres")]
@@ -21,45 +20,39 @@ async fn transaction_test<C: AsyncConnection<Backend = TestBackend>>(
     conn: &mut C,
 ) -> QueryResult<()> {
     let res = conn
-        .transaction::<i32, diesel::result::Error, _>(|conn| {
-            async move {
-                let users: Vec<User> = users::table.load(conn).await?;
-                assert_eq!(&users[0].name, "John Doe");
-                assert_eq!(&users[1].name, "Jane Doe");
+        .transaction::<i32, diesel::result::Error, _>(async |conn| {
+            let users: Vec<User> = users::table.load(conn).await?;
+            assert_eq!(&users[0].name, "John Doe");
+            assert_eq!(&users[1].name, "Jane Doe");
 
-                let user: Option<User> = users::table.find(42).first(conn).await.optional()?;
-                assert_eq!(user, None::<User>);
+            let user: Option<User> = users::table.find(42).first(conn).await.optional()?;
+            assert_eq!(user, None::<User>);
 
-                let res = conn
-                    .transaction::<_, diesel::result::Error, _>(|conn| {
-                        async move {
-                            diesel::insert_into(users::table)
-                                .values(users::name.eq("Dave"))
-                                .execute(conn)
-                                .await?;
-                            let count = users::table.count().get_result::<i64>(conn).await?;
-                            assert_eq!(count, 3);
-                            Ok(())
-                        }
-                        .scope_boxed()
-                    })
-                    .await;
-                assert!(res.is_ok());
-                let count = users::table.count().get_result::<i64>(conn).await?;
-                assert_eq!(count, 3);
+            let res = conn
+                .transaction::<_, diesel::result::Error, _>(async |conn| {
+                    diesel::insert_into(users::table)
+                        .values(users::name.eq("Dave"))
+                        .execute(conn)
+                        .await?;
+                    let count = users::table.count().get_result::<i64>(conn).await?;
+                    assert_eq!(count, 3);
+                    Ok(())
+                })
+                .await;
+            assert!(res.is_ok());
+            let count = users::table.count().get_result::<i64>(conn).await?;
+            assert_eq!(count, 3);
 
-                let res = diesel::insert_into(users::table)
-                    .values(users::name.eq("Eve"))
-                    .execute(conn)
-                    .await?;
+            let res = diesel::insert_into(users::table)
+                .values(users::name.eq("Eve"))
+                .execute(conn)
+                .await?;
 
-                assert_eq!(res, 1, "Insert in transaction returned wrong result");
-                let count = users::table.count().get_result::<i64>(conn).await?;
-                assert_eq!(count, 4);
+            assert_eq!(res, 1, "Insert in transaction returned wrong result");
+            let count = users::table.count().get_result::<i64>(conn).await?;
+            assert_eq!(count, 4);
 
-                Err(diesel::result::Error::RollbackTransaction)
-            }
-            .scope_boxed()
+            Err(diesel::result::Error::RollbackTransaction)
         })
         .await;
     assert_eq!(

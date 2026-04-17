@@ -438,7 +438,6 @@ impl AsyncPgConnection {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
-    /// # use scoped_futures::ScopedFutureExt;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -452,7 +451,7 @@ impl AsyncPgConnection {
     ///     .read_only()
     ///     .serializable()
     ///     .deferrable()
-    ///     .run(|conn| async move { Ok(()) }.scope_boxed())
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -736,7 +735,6 @@ impl AsyncPgConnection {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
-    /// # use scoped_futures::ScopedFutureExt;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -1087,7 +1085,6 @@ mod tests {
     use diesel::sql_types::Integer;
     use diesel::IntoSql;
     use futures_util::future::try_join;
-    use scoped_futures::ScopedFutureExt;
 
     #[tokio::test]
     async fn pipelining() {
@@ -1172,27 +1169,24 @@ mod tests {
             try_join(f3, try_join(f4, try_join(f5, try_join(f6, f7)))).await
         }
 
-        conn.transaction(|conn| {
-            async move {
-                let f12 = fn12(conn);
-                let f37 = fn37(conn);
+        conn.transaction(async |conn| {
+            let f12 = fn12(conn);
+            let f37 = fn37(conn);
 
-                let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
+            let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
 
-                assert_eq!(r1, 1);
-                assert_eq!(r2, 2);
-                assert_eq!(r3, 1);
-                assert_eq!(r4, vec![4]);
-                assert_eq!(r5, 5);
-                assert_eq!(r6, vec![6]);
-                assert_eq!(r7, 7);
+            assert_eq!(r1, 1);
+            assert_eq!(r2, 2);
+            assert_eq!(r3, 1);
+            assert_eq!(r4, vec![4]);
+            assert_eq!(r5, 5);
+            assert_eq!(r6, vec![6]);
+            assert_eq!(r7, 7);
 
-                fn12(conn).await?;
-                fn37(conn).await?;
+            fn12(conn).await?;
+            fn37(conn).await?;
 
-                QueryResult::<_>::Ok(())
-            }
-            .scope_boxed()
+            QueryResult::<_>::Ok(())
         })
         .await
         .unwrap();

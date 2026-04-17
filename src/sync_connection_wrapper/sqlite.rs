@@ -1,8 +1,8 @@
 use diesel::connection::AnsiTransactionManager;
 use diesel::SqliteConnection;
-use scoped_futures::ScopedBoxFuture;
 
 use crate::sync_connection_wrapper::SyncTransactionManagerWrapper;
+use crate::transaction_manager::AsyncFunc;
 use crate::TransactionManager;
 
 use super::SyncConnectionWrapper;
@@ -21,7 +21,6 @@ impl SyncConnectionWrapper<SqliteConnection> {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// use diesel::result::Error;
-    /// use scoped_futures::ScopedFutureExt;
     /// use diesel_async::{RunQueryDsl, AsyncConnection};
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
@@ -32,7 +31,7 @@ impl SyncConnectionWrapper<SqliteConnection> {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use schema::users::dsl::*;
     /// #     let conn = &mut connection_no_transaction().await;
-    /// conn.immediate_transaction(|conn| async move {
+    /// conn.immediate_transaction(async |conn| {
     ///     diesel::insert_into(users)
     ///         .values(name.eq("Ruby"))
     ///         .execute(conn)
@@ -42,12 +41,15 @@ impl SyncConnectionWrapper<SqliteConnection> {
     ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     ///
     ///     Ok(())
-    /// }.scope_boxed()).await
+    /// }).await
     /// # }
     /// ```
     pub async fn immediate_transaction<'a, R, E, F>(&mut self, f: F) -> Result<R, E>
     where
-        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Self) -> Result<R, E>
+            + AsyncFunc<&'r mut Self, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: From<diesel::result::Error> + Send + 'a,
         R: Send + 'a,
     {
@@ -67,7 +69,6 @@ impl SyncConnectionWrapper<SqliteConnection> {
     /// ```rust
     /// # include!("../doctest_setup.rs");
     /// use diesel::result::Error;
-    /// use scoped_futures::ScopedFutureExt;
     /// use diesel_async::{RunQueryDsl, AsyncConnection};
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
@@ -78,7 +79,7 @@ impl SyncConnectionWrapper<SqliteConnection> {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use schema::users::dsl::*;
     /// #     let conn = &mut connection_no_transaction().await;
-    /// conn.exclusive_transaction(|conn| async move {
+    /// conn.exclusive_transaction(async |conn|  {
     ///     diesel::insert_into(users)
     ///         .values(name.eq("Ruby"))
     ///         .execute(conn)
@@ -88,12 +89,15 @@ impl SyncConnectionWrapper<SqliteConnection> {
     ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     ///
     ///     Ok(())
-    /// }.scope_boxed()).await
+    /// }).await
     /// # }
     /// ```
     pub async fn exclusive_transaction<'a, R, E, F>(&mut self, f: F) -> Result<R, E>
     where
-        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Self) -> Result<R, E>
+            + AsyncFunc<&'r mut Self, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: From<diesel::result::Error> + Send + 'a,
         R: Send + 'a,
     {
@@ -102,7 +106,10 @@ impl SyncConnectionWrapper<SqliteConnection> {
 
     async fn transaction_sql<'a, R, E, F>(&mut self, f: F, sql: &'static str) -> Result<R, E>
     where
-        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Self) -> Result<R, E>
+            + AsyncFunc<&'r mut Self, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: From<diesel::result::Error> + Send + 'a,
         R: Send + 'a,
     {

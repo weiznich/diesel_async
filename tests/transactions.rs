@@ -34,39 +34,35 @@ async fn concurrent_serializable_transactions_behave_correctly() {
 
     let mut tx = conn.build_transaction().serializable().read_write();
 
-    let res = tx.run(|conn| {
-        Box::pin(async {
-            users3::table.select(users3::id).load::<i32>(conn).await?;
+    let res = tx.run(async |conn| {
+        users3::table.select(users3::id).load::<i32>(conn).await?;
 
-            barrier_1_for_tx1.wait().await;
-            diesel::insert_into(users3::table)
-                .values(users3::id.eq(1))
-                .execute(conn)
-                .await?;
-            barrier_3_for_tx1.wait().await;
-            barrier_2_for_tx1.wait().await;
+        barrier_1_for_tx1.wait().await;
+        diesel::insert_into(users3::table)
+            .values(users3::id.eq(1))
+            .execute(conn)
+            .await?;
+        barrier_3_for_tx1.wait().await;
+        barrier_2_for_tx1.wait().await;
 
-            Ok::<_, diesel::result::Error>(())
-        })
+        Ok::<_, diesel::result::Error>(())
     });
 
     let mut tx1 = conn1.build_transaction().serializable().read_write();
 
     let res1 = async {
         let res = tx1
-            .run(|conn| {
-                Box::pin(async {
-                    users3::table.select(users3::id).load::<i32>(conn).await?;
+            .run(async |conn| {
+                users3::table.select(users3::id).load::<i32>(conn).await?;
 
-                    barrier_1_for_tx2.wait().await;
-                    diesel::insert_into(users3::table)
-                        .values(users3::id.eq(1))
-                        .execute(conn)
-                        .await?;
-                    barrier_3_for_tx2.wait().await;
+                barrier_1_for_tx2.wait().await;
+                diesel::insert_into(users3::table)
+                    .values(users3::id.eq(1))
+                    .execute(conn)
+                    .await?;
+                barrier_3_for_tx2.wait().await;
 
-                    Ok::<_, diesel::result::Error>(())
-                })
+                Ok::<_, diesel::result::Error>(())
             })
             .await;
         barrier_2_for_tx2.wait().await;
@@ -99,9 +95,7 @@ async fn concurrent_serializable_transactions_behave_correctly() {
 
     let mut tx = conn.build_transaction();
 
-    let res = tx
-        .run(|_| Box::pin(async { Ok::<_, diesel::result::Error>(()) }))
-        .await;
+    let res = tx.run(async |_| Ok::<_, diesel::result::Error>(())).await;
 
     assert!(
         res.is_ok(),
@@ -161,39 +155,35 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 
     let mut tx = conn.build_transaction().serializable().read_write();
 
-    let res = tx.run(|conn| {
-        Box::pin(async {
-            users4::table.select(users4::id).load::<i32>(conn).await?;
+    let res = tx.run(async |conn| {
+        users4::table.select(users4::id).load::<i32>(conn).await?;
 
-            barrier_1_for_tx1.wait().await;
-            diesel::insert_into(users4::table)
-                .values(users4::id.eq(1))
-                .execute(conn)
-                .await?;
-            barrier_3_for_tx1.wait().await;
-            barrier_2_for_tx1.wait().await;
+        barrier_1_for_tx1.wait().await;
+        diesel::insert_into(users4::table)
+            .values(users4::id.eq(1))
+            .execute(conn)
+            .await?;
+        barrier_3_for_tx1.wait().await;
+        barrier_2_for_tx1.wait().await;
 
-            Ok::<_, diesel::result::Error>(())
-        })
+        Ok::<_, diesel::result::Error>(())
     });
 
     let mut tx1 = conn1.build_transaction().serializable().read_write();
 
     let res1 = async {
         let res = tx1
-            .run(|conn| {
-                Box::pin(async {
-                    users4::table.select(users4::id).load::<i32>(conn).await?;
+            .run(async |conn| {
+                users4::table.select(users4::id).load::<i32>(conn).await?;
 
-                    barrier_1_for_tx2.wait().await;
-                    diesel::insert_into(users4::table)
-                        .values(users4::id.eq(1))
-                        .execute(conn)
-                        .await?;
-                    barrier_3_for_tx2.wait().await;
+                barrier_1_for_tx2.wait().await;
+                diesel::insert_into(users4::table)
+                    .values(users4::id.eq(1))
+                    .execute(conn)
+                    .await?;
+                barrier_3_for_tx2.wait().await;
 
-                    Ok::<_, diesel::result::Error>(())
-                })
+                Ok::<_, diesel::result::Error>(())
             })
             .await;
         barrier_2_for_tx2.wait().await;
@@ -226,9 +216,7 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 
     let mut tx = conn.build_transaction();
 
-    let res = tx
-        .run(|_| Box::pin(async { Ok::<_, diesel::result::Error>(()) }))
-        .await;
+    let res = tx.run(async |_| Ok::<_, diesel::result::Error>(())).await;
 
     assert!(
         res.is_ok(),
