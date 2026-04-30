@@ -4,13 +4,15 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
-## [Unreleased]
+## [0.9.0] - 2026-04-30
 
 * Change all transaction related functions to accept an real async closure instead of 
   the scoped boxed variant. This change requires adujsting all call sides of transaction 
   based functions from `conn.transaction(|conn| async move {/* your code */}.scoped_boxed())`
   to `conn.transaction(async |conn| /* your code */)`
-
+* Fixed an unsound access to padding values while deserializing Date/Time values in the mysql backend
+  Thanks to Paolo Barbolini for finding this issue.
+  
 ## [0.8.0] - 2026-03-20
 
 * Added support for UpdateAndFetchResults for `SyncConnectionWrapper`, allowing to use `save_changes`
@@ -142,4 +144,5 @@ in the pool should be checked if they are still valid
 [0.7.3]: https://github.com/weiznich/diesel_async/compare/v0.7.2...v0.7.3
 [0.7.4]: https://github.com/weiznich/diesel_async/compare/v0.7.3...v0.7.4
 [0.8.0]: https://github.com/weiznich/diesel_async/compare/v0.7.4...v0.8.0
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.8.0...main
+[0.9.0]: https://github.com/weiznich/diesel_async/compare/v0.8.0...v0.9.0
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.9.0...main
