@@ -90,4 +90,8 @@ where
             .map_err(PoolError::QueryError)?;
         Ok(conn)
     }
+
+    fn validate(&self, conn: &mut Self::Connection) -> bool {
+        std::thread::panicking() || conn.is_broken()
+    }
 }

@@ -4,6 +4,10 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
+## [0.9.1] - 2026-06-05
+
+* Correctly check if a connection is a broken state (e.g. has an open transaction) for the mobc pool implementation
+
 ## [0.9.0] - 2026-04-30
 
 * Change all transaction related functions to accept an real async closure instead of 
