@@ -12,6 +12,8 @@ on:
       - 0.2.x
 
 name: CI Tests
+permissions:
+  contents: "read"
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 # This will ensure that only one commit will be running tests at a time on each PR.
@@ -31,9 +33,9 @@ jobs:
           [
             ubuntu-latest,
             macos-15-intel,
-            macos-15,
+            macos-26,
             windows-latest,
-            ubuntu-22.04-arm,
+            ubuntu-24.04-arm,
           ]
         include:
           - rust: "beta"
@@ -57,10 +59,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@f51f967e158417aafa338a1e46ab22095f07aa01 # v2.8.2
         with:
           key: ${{ runner.os }}-${{ matrix.backend }}-cargo-${{ hashFiles('**/Cargo.toml') }}
 
@@ -83,7 +87,7 @@ jobs:
           echo "RUSTFLAGS=-D warnings" >> $GITHUB_ENV
           echo "RUSTDOCFLAGS=-D warnings" >> $GITHUB_ENV
 
-      - uses: ilammy/setup-nasm@v1
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
         if: matrix.backend == 'postgres' && matrix.os == 'windows-latest'
 
       - name: Install postgres (Linux)
@@ -138,7 +142,7 @@ jobs:
           echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS M1)
-        if: matrix.os == 'macos-15' && matrix.backend == 'mysql'
+        if: matrix.os == 'macos-26' && matrix.backend == 'mysql'
         run: |
           brew install mariadb@11.4
           ls /opt/homebrew/opt/mariadb@11.4
@@ -158,10 +162,15 @@ jobs:
 
       - name: Install mysql (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'mysql'
-        shell: cmd
+        shell: bash
         run: |
-          choco install mysql
-          "C:\tools\mysql\current\bin\mysql" -e "create database diesel_test; create database diesel_unit_test; grant all on `diesel_%`.* to 'root'@'localhost';" -uroot
+          mkdir "C:\\Program Files\\MySQL\\MySQL Server 8.0\\data\\"
+          "C:\\Program Files\\MySQL\MySQL Server 8.0\\bin\\mysqld" --console --initialize --initialize-insecure
+          "C:\\Program Files\\MySQL\MySQL Server 8.0\\bin\\mysqld" --console &
+          sleep 15
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e "create database diesel_test;" -u root
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e "create database diesel_unit_test;" -u root
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e 'grant all on `diesel_%`.* to 'root'@'localhost';' -uroot
 
       - name: Set variables for mysql (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'mysql'
@@ -186,37 +195,46 @@ jobs:
           echo "SQLITE3_LIB_DIR=C:\ProgramData\chocolatey\lib\SQLite\tools" >> $GITHUB_ENV
           echo "DATABASE_URL=:memory:" >> $GITHUB_ENV
 
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
       - name: Rust version check
-        run: cargo +${{ matrix.rust }} version
+        env:
+          RUST: ${{ matrix.rust }}
+        run: |
+          rustup override set $RUST
+          cargo --version
+          rustc --version
 
       - name: Test diesel_async
-        run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc async-connection-wrapper migrations"
+        shell: bash
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          cargo test --manifest-path Cargo.toml --no-default-features -F "$BACKEND" --features "deadpool bb8 mobc async-connection-wrapper migrations"
 
       - name: Run examples (Postgres)
         if: matrix.backend == 'postgres'
         run: |
-          cargo +${{ matrix.rust }} check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
-          cargo +${{ matrix.rust }} check --manifest-path examples/postgres/run-pending-migrations-with-rustls/Cargo.toml
+          cargo check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
+          cargo check --manifest-path examples/postgres/run-pending-migrations-with-rustls/Cargo.toml
 
       - name: Run examples (Sqlite)
         if: matrix.backend == 'sqlite'
         run: |
-          cargo +${{ matrix.rust }} check --manifest-path examples/sync-wrapper/Cargo.toml
+          cargo check --manifest-path examples/sync-wrapper/Cargo.toml
 
   rustfmt_and_clippy:
     name: Check rustfmt style && run clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          components: clippy, rustfmt
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup override set stable
+          rustup component add rustfmt clippy
       - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@f51f967e158417aafa338a1e46ab22095f07aa01 # v2.8.2
         with:
           key: clippy-cargo-${{ hashFiles('**/Cargo.toml') }}
 
@@ -229,17 +247,22 @@ jobs:
       - name: Run clippy
         run: cargo +stable clippy --all --all-features
 
-      - name: Check formating
+      - name: Check formatting
         run: cargo +stable fmt --all -- --check
   minimal_rust_version:
     name: Check Minimal supported rust version (1.86.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.86.0
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup update nightly
+      - uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        with:
+          tool: cargo-hack, cargo-minimal-versions
       - name: Check diesel-async
         # cannot test mysql yet as that crate
         # has broken min-version dependencies
@@ -250,8 +273,15 @@ jobs:
     name: Check all feature combination build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup override set stable
+      - uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        with:
+          tool: cargo-hack
       - name: Check feature combinations
         run: cargo hack check --feature-powerset --no-dev-deps --depth 2
