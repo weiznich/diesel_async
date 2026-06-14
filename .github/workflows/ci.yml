@@ -115,7 +115,9 @@ jobs:
             sudo apt-get install -y postgresql-common
             sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
             sudo apt-get install -y "postgresql-$PG_VERSION"
-            sudo systemctl restart "postgresql@$PG_VERSION-main"
+            sudo pg_dropcluster --stop "$PG_VERSION" main 2>/dev/null || true
+            sudo pg_createcluster "$PG_VERSION" main
+            sudo pg_ctlcluster --skip-systemctl-redirect "$PG_VERSION" main start
             port=$(pg_lsclusters -h | awk -v v="$PG_VERSION" '$1 == v {print $3}')
           else
             sudo apt-get install -y postgresql
