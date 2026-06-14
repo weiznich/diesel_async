@@ -5,6 +5,8 @@ use std::fmt::Debug;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
+#[cfg(feature = "postgres")]
+mod errors;
 mod instrumentation;
 #[cfg(feature = "migrations")]
 mod migrations;
