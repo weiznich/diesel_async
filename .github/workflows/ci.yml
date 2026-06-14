@@ -37,7 +37,21 @@ jobs:
             windows-latest,
             ubuntu-24.04-arm,
           ]
+        exclude:
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
         include:
+          # Adding two extra jobs for the single one exlucded above with pinned postgres versions
+          # as there is a change in behaviour (see `restrict_violation_error_kind` test)
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "17"
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "18"
           - rust: "beta"
             backend: "postgres"
             os: "ubuntu-latest"
@@ -92,14 +106,25 @@ jobs:
 
       - name: Install postgres (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'postgres'
+        env:
+          PG_VERSION: ${{ matrix.pg_version }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql
-          echo "host    all             all             127.0.0.1/32            md5" > sudo tee -a /etc/postgresql/10/main/pg_hba.conf
-          sudo service postgresql restart && sleep 3
-          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-          sudo service postgresql restart && sleep 3
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost/" >> $GITHUB_ENV
+          if [ -n "$PG_VERSION" ]; then
+            # See https://www.postgresql.org/download/linux/ubuntu/
+            sudo apt-get install -y postgresql-common
+            sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+            sudo apt-get install -y "postgresql-$PG_VERSION"
+            sudo systemctl restart "postgresql@$PG_VERSION-main"
+            port=$(pg_lsclusters -h | awk -v v="$PG_VERSION" '$1 == v {print $3}')
+          else
+            sudo apt-get install -y postgresql
+            sudo service postgresql restart
+            port=5432
+          fi
+          sleep 3
+          sudo -u postgres psql -p "$port" -c "ALTER USER postgres PASSWORD 'postgres';"
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:$port/" >> "$GITHUB_ENV"
 
       - name: Install mysql (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'mysql'
