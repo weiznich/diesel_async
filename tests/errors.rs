@@ -1,10 +1,10 @@
 use crate::connection;
+use assert_matches::assert_matches;
 use diesel::dsl::{delete, insert_into, sql};
 use diesel::result::{DatabaseErrorKind, Error};
 use diesel::sql_types::Integer;
 use diesel::{table, Insertable};
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
-use assert_matches::assert_matches;
 
 table! {
     use diesel::sql_types::*;
@@ -62,17 +62,18 @@ async fn unique_violation_error_kind() {
 async fn foreign_key_violation_error_kind() {
     let connection = &mut connection().await;
 
-    connection.batch_execute(
-        r#"
+    connection
+        .batch_execute(
+            r#"
             CREATE TABLE parent (id INTEGER PRIMARY KEY);
             CREATE TABLE child (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER REFERENCES parent(id) ON DELETE RESTRICT
             );
         "#,
-    )
-    .await
-    .unwrap();
+        )
+        .await
+        .unwrap();
 
     let err = insert_into(child::table)
         .values(&[Child {
@@ -90,17 +91,18 @@ async fn foreign_key_violation_error_kind() {
 async fn restrict_violation_error_kind() {
     let connection = &mut connection().await;
 
-    connection.batch_execute(
-        r#"
+    connection
+        .batch_execute(
+            r#"
             CREATE TABLE parent (id INTEGER PRIMARY KEY);
             CREATE TABLE child (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER REFERENCES parent(id) ON DELETE RESTRICT
             );
         "#,
-    )
-    .await
-    .unwrap();
+        )
+        .await
+        .unwrap();
 
     insert_into(parent::table)
         .values(&[Parent { id: 1 }])
@@ -117,11 +119,12 @@ async fn restrict_violation_error_kind() {
         .await
         .unwrap();
 
-    let pg_version_num =
-        diesel::select(sql::<Integer>("current_setting('server_version_num')::integer"))
-            .get_result::<i32>(connection)
-            .await
-            .unwrap();
+    let pg_version_num = diesel::select(sql::<Integer>(
+        "current_setting('server_version_num')::integer",
+    ))
+    .get_result::<i32>(connection)
+    .await
+    .unwrap();
 
     let err = delete(parent::table).execute(connection).await.unwrap_err();
 
@@ -210,6 +213,6 @@ async fn check_violation_error_kind() {
         .execute(connection)
         .await
         .unwrap_err();
-    
+
     assert_matches!(err, Error::DatabaseError(kind, _) if kind == DatabaseErrorKind::CheckViolation);
 }

@@ -228,11 +228,11 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
 #[cfg(feature = "postgres")]
 #[tokio::test]
 async fn read_only_transaction_error_kind() {
+    use assert_matches::assert_matches;
     use diesel::insert_into;
     use diesel::prelude::*;
     use diesel::result::Error;
     use diesel_async::RunQueryDsl;
-    use assert_matches::assert_matches;
 
     table! {
         use diesel::sql_types::*;
