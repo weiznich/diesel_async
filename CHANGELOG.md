@@ -4,6 +4,11 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
+## [0.9.2] - 2026-06-19
+
+* Improve the check if a connection is still working in our connection pool implementation by actually loading the response
+* Improve mapping of SQL error states to diesel database error kinds for PostgreSQL 18 and newer
+
 ## [0.9.1] - 2026-06-05
 
 * Correctly check if a connection is a broken state (e.g. has an open transaction) for the mobc pool implementation
@@ -149,4 +154,6 @@ in the pool should be checked if they are still valid
 [0.7.4]: https://github.com/weiznich/diesel_async/compare/v0.7.3...v0.7.4
 [0.8.0]: https://github.com/weiznich/diesel_async/compare/v0.7.4...v0.8.0
 [0.9.0]: https://github.com/weiznich/diesel_async/compare/v0.8.0...v0.9.0
+[0.9.1]: https://github.com/diesel-rs/diesel_async/compare/v0.9.0...v0.9.1
+[0.9.2]: https://github.com/diesel-rs/diesel_async/compare/v0.9.1...v0.9.2
 [Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.9.0...main
