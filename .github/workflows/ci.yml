@@ -14,6 +14,13 @@ on:
 name: CI Tests
 permissions:
   contents: "read"
+env:
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # Force HTTP/1.1 for crates.io downloads: HTTP/2 multiplexing against the
+  # CDN intermittently drops connections mid-stream (SSL "unexpected eof"),
+  # and cargo does not retry those, so CARGO_NET_RETRY alone cannot recover.
+  CARGO_HTTP_MULTIPLEXING: "false"
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 # This will ensure that only one commit will be running tests at a time on each PR.
@@ -37,7 +44,21 @@ jobs:
             windows-latest,
             ubuntu-24.04-arm,
           ]
+        exclude:
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
         include:
+          # Adding two extra jobs for the single one exlucded above with pinned postgres versions
+          # as there is a change in behaviour (see `restrict_violation_error_kind` test)
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "17"
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "18"
           - rust: "beta"
             backend: "postgres"
             os: "ubuntu-latest"
@@ -92,14 +113,27 @@ jobs:
 
       - name: Install postgres (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'postgres'
+        env:
+          PG_VERSION: ${{ matrix.pg_version }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql
-          echo "host    all             all             127.0.0.1/32            md5" > sudo tee -a /etc/postgresql/10/main/pg_hba.conf
-          sudo service postgresql restart && sleep 3
-          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-          sudo service postgresql restart && sleep 3
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost/" >> $GITHUB_ENV
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
+          if [ -n "$PG_VERSION" ]; then
+            # See https://www.postgresql.org/download/linux/ubuntu/
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql-common
+            sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y "postgresql-$PG_VERSION"
+            sudo pg_dropcluster --stop "$PG_VERSION" main 2>/dev/null || true
+            sudo pg_createcluster "$PG_VERSION" main
+            sudo pg_ctlcluster --skip-systemctl-redirect "$PG_VERSION" main start
+            port=$(pg_lsclusters -h | awk -v v="$PG_VERSION" '$1 == v {print $3}')
+          else
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql
+            sudo service postgresql restart
+            port=5432
+          fi
+          sleep 3
+          sudo -u postgres psql -p "$port" -c "ALTER USER postgres PASSWORD 'postgres';"
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:$port/" >> "$GITHUB_ENV"
 
       - name: Install mysql (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'mysql'
@@ -111,8 +145,8 @@ jobs:
       - name: Install sqlite (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'sqlite'
         run: |
-          sudo apt-get update
-          sudo apt-get install libsqlite3-dev
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
+          sudo apt-get -o DPkg::Lock::Timeout=300 install libsqlite3-dev
           echo "DATABASE_URL=:memory:" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
@@ -184,7 +218,7 @@ jobs:
         run: |
           choco install sqlite
           cd /D C:\ProgramData\chocolatey\lib\SQLite\tools
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
           lib /machine:x64 /def:sqlite3.def /out:sqlite3.lib
 
       - name: Set variables for sqlite (Windows)

@@ -224,3 +224,47 @@ async fn commit_with_serialization_failure_already_ends_transaction() {
         res.unwrap_err()
     );
 }
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn read_only_transaction_error_kind() {
+    use assert_matches::assert_matches;
+    use diesel::insert_into;
+    use diesel::prelude::*;
+    use diesel::result::Error;
+    use diesel_async::RunQueryDsl;
+
+    table! {
+        use diesel::sql_types::*;
+        users_read_only {
+            id -> Integer,
+        }
+    }
+
+    #[derive(Insertable, Debug)]
+    #[diesel(table_name = users_read_only)]
+    struct User {
+        id: i32,
+    }
+
+    let mut conn = super::connection_without_transaction().await;
+    diesel::sql_query("CREATE TABLE IF NOT EXISTS users_read_only ( id INTEGER PRIMARY KEY )")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    let mut tx = conn.build_transaction().read_only();
+
+    let err = tx
+        .run(async |c| {
+            insert_into(users_read_only::table)
+                .values(&[User { id: 1 }])
+                .execute(c)
+                .await?;
+            Ok::<_, Error>(())
+        })
+        .await
+        .unwrap_err();
+
+    assert_matches!(err, Error::DatabaseError(kind, _) if kind == diesel::result::DatabaseErrorKind::ReadOnlyTransaction);
+}
