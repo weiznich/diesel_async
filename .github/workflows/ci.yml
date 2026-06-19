@@ -14,6 +14,13 @@ on:
 name: CI Tests
 permissions:
   contents: "read"
+env:
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # Force HTTP/1.1 for crates.io downloads: HTTP/2 multiplexing against the
+  # CDN intermittently drops connections mid-stream (SSL "unexpected eof"),
+  # and cargo does not retry those, so CARGO_NET_RETRY alone cannot recover.
+  CARGO_HTTP_MULTIPLEXING: "false"
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 # This will ensure that only one commit will be running tests at a time on each PR.
@@ -109,18 +116,18 @@ jobs:
         env:
           PG_VERSION: ${{ matrix.pg_version }}
         run: |
-          sudo apt-get update
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
           if [ -n "$PG_VERSION" ]; then
             # See https://www.postgresql.org/download/linux/ubuntu/
-            sudo apt-get install -y postgresql-common
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql-common
             sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-            sudo apt-get install -y "postgresql-$PG_VERSION"
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y "postgresql-$PG_VERSION"
             sudo pg_dropcluster --stop "$PG_VERSION" main 2>/dev/null || true
             sudo pg_createcluster "$PG_VERSION" main
             sudo pg_ctlcluster --skip-systemctl-redirect "$PG_VERSION" main start
             port=$(pg_lsclusters -h | awk -v v="$PG_VERSION" '$1 == v {print $3}')
           else
-            sudo apt-get install -y postgresql
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql
             sudo service postgresql restart
             port=5432
           fi
@@ -138,8 +145,8 @@ jobs:
       - name: Install sqlite (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'sqlite'
         run: |
-          sudo apt-get update
-          sudo apt-get install libsqlite3-dev
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
+          sudo apt-get -o DPkg::Lock::Timeout=300 install libsqlite3-dev
           echo "DATABASE_URL=:memory:" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
