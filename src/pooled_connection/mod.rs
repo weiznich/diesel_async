@@ -173,8 +173,8 @@ pub trait PoolableConnection: AsyncConnection {
     ) -> impl Future<Output = diesel::QueryResult<()>> + Send
     where
         for<'a> Self: 'a,
-        diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
-            crate::methods::ExecuteDsl<Self>,
+        for<'a> diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+            crate::methods::LoadQuery<'a, Self, i32>,
         diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<Self>,
     {
         use crate::run_query_dsl::RunQueryDsl;
@@ -185,7 +185,7 @@ pub trait PoolableConnection: AsyncConnection {
                 RecyclingMethod::Fast => Ok(()),
                 RecyclingMethod::Verified => {
                     diesel::select(1_i32.into_sql::<diesel::sql_types::Integer>())
-                        .execute(self)
+                        .get_result::<i32>(self)
                         .await
                         .map(|_| ())
                 }
