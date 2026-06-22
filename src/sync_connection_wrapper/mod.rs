@@ -152,9 +152,8 @@ mod implementation {
         // SpawnBlocking bounds
         S: SpawnBlocking + Send,
     {
-        type LoadFuture<'conn, 'query> =
-            BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
-        type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
+        type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
+        type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
         type Stream<'conn, 'query> = BoxStream<'static, QueryResult<Self::Row<'conn, 'query>>>;
         type Row<'conn, 'query> = O;
         type Backend = <C as Connection>::Backend;
