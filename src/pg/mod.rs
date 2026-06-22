@@ -933,6 +933,13 @@ where
 
         PgTypeMetadata::from_result(Ok(oid))
     }
+
+    fn as_any<'a>(&mut self) -> &mut (dyn std::any::Any + 'a)
+    where
+        Self: 'a,
+    {
+        self
+    }
 }
 
 async fn lookup_type(
