@@ -1,4 +1,5 @@
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
+use crate::AsyncMultiConnectionHelper;
 use crate::{AnsiTransactionManager, AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{
     MaybeCached, QueryFragmentForCachedStatement, StatementCache,
@@ -10,6 +11,7 @@ use diesel::mysql::{Mysql, MysqlQueryBuilder, MysqlType};
 use diesel::query_builder::QueryBuilder;
 use diesel::query_builder::{bind_collector::RawBytesBindCollector, QueryFragment, QueryId};
 use diesel::result::{ConnectionError, ConnectionResult};
+use diesel::sql_types::TypeMetadata;
 use diesel::QueryResult;
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
@@ -354,6 +356,20 @@ impl AsyncMysqlConnection {
             instrumentation: DynInstrumentation::none(),
             stmt_to_free: Vec::new(),
         })
+    }
+}
+
+impl AsyncMultiConnectionHelper for AsyncMysqlConnection {
+    fn to_any<'a>(
+        lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+    ) -> &mut (dyn std::any::Any + 'a) {
+        lookup
+    }
+
+    fn from_any(
+        lookup: &mut dyn std::any::Any,
+    ) -> Option<&mut <Self::Backend as diesel::sql_types::TypeMetadata>::MetadataLookup> {
+        lookup.downcast_mut()
     }
 }
 
