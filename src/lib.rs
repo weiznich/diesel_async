@@ -419,3 +419,17 @@ pub trait AsyncMultiConnectionHelper: AsyncConnectionCore {
         lookup: &mut dyn std::any::Any,
     ) -> Option<&mut <Self::Backend as TypeMetadata>::MetadataLookup>;
 }
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "pool")]
+macro_rules! expand_pool {
+        ($($tt:tt)*) => {$($tt)*};
+    }
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "pool"))]
+macro_rules! expand_pool {
+    ($($tt:tt)*) => {};
+}
