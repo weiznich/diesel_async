@@ -11,6 +11,7 @@ mod instrumentation;
 #[cfg(feature = "migrations")]
 mod migrations;
 mod notifications;
+mod multiconnection;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
 #[cfg(feature = "async-connection-wrapper")]

@@ -60,7 +60,9 @@ futures-util = { version = "0.3.17", features = ["async-await-macro"] }
 version = "~2.3.0"
 default-features = false
 features = [
-  "chrono"
+  "chrono", 
+  "time", 
+  "numeric"
 ]
 
 [dev-dependencies.diesel_migrations]
