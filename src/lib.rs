@@ -97,6 +97,7 @@ use diesel::backend::Backend;
 use diesel::connection::{CacheSize, Instrumentation};
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
+use diesel::sql_types::TypeMetadata;
 use diesel::{ConnectionResult, QueryResult};
 use futures_core::Stream;
 use futures_util::FutureExt;
@@ -403,4 +404,32 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
 
     /// Set the prepared statement cache size to [`CacheSize`] for this connection
     fn set_prepared_statement_cache_size(&mut self, size: CacheSize);
+}
+
+/// `AsyncMultiConnectionHelper` is an async copy of `MultiConnectionHelper` trait.
+/// It is used to support async MultiConnection implementations.
+pub trait AsyncMultiConnectionHelper: AsyncConnectionCore {
+    /// Convert the lookup type to any
+    fn to_any<'a>(
+        lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+    ) -> &mut (dyn std::any::Any + 'a);
+
+    /// Get the lookup type from any
+    fn from_any(
+        lookup: &mut dyn std::any::Any,
+    ) -> Option<&mut <Self::Backend as TypeMetadata>::MetadataLookup>;
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "pool")]
+macro_rules! expand_pool {
+        ($($tt:tt)*) => {$($tt)*};
+    }
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "pool"))]
+macro_rules! expand_pool {
+    ($($tt:tt)*) => {};
 }

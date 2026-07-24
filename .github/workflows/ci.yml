@@ -284,7 +284,7 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all -- --check
   minimal_rust_version:
-    name: Check Minimal supported rust version (1.86.0)
+    name: Check Minimal supported rust version (1.88.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -302,7 +302,7 @@ jobs:
         # has broken min-version dependencies
         # cannot test sqlite yet as that crate
         # as broken min-version dependencies as well
-        run: cargo +1.86.0 minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
+        run: cargo +1.88.0 minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
   all_features_build:
     name: Check all feature combination build
     runs-on: ubuntu-latest

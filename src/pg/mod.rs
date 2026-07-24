@@ -8,6 +8,7 @@ use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
+use crate::AsyncMultiConnectionHelper;
 use crate::{AnsiTransactionManager, AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{
     PrepareForCache, QueryFragmentForCachedStatement, StatementCache,
@@ -21,6 +22,7 @@ use diesel::pg::{
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
 use diesel::result::{DatabaseErrorKind, Error};
+use diesel::sql_types::TypeMetadata;
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
@@ -792,7 +794,7 @@ fn construct_bind_data(query: &dyn QueryFragment<diesel::pg::Pg>) -> BindData {
     let mut metadata_lookup_0 = PgAsyncMetadataLookup {
         custom_oid: false,
         generated_oids: None,
-        oid_generator: |_, _| (FAKE_OID, FAKE_OID),
+        oid_generator: Box::new(|_, _| (FAKE_OID, FAKE_OID)),
     };
     let collect_bind_result_0 =
         query.collect_binds(&mut bind_collector_0, &mut metadata_lookup_0, &Pg);
@@ -824,10 +826,10 @@ fn construct_bind_data(query: &dyn QueryFragment<diesel::pg::Pg>) -> BindData {
         let mut metadata_lookup_1 = PgAsyncMetadataLookup {
             custom_oid: false,
             generated_oids: Some(HashMap::new()),
-            oid_generator: move |_, _| {
+            oid_generator: Box::new(move |_, _| {
                 max_oid += 2;
                 (max_oid, max_oid + 1)
-            },
+            }),
         };
         let collect_bind_result_1 =
             query.collect_binds(&mut bind_collector_1, &mut metadata_lookup_1, &Pg);
@@ -911,16 +913,13 @@ type GeneratedOidTypeMap = Option<HashMap<(Option<String>, String), (u32, u32)>>
 
 /// Collects types that need to be looked up, and causes fake OIDs to be written into the bind collector
 /// so they can be replaced with asynchronously fetched OIDs after the original query is dropped
-struct PgAsyncMetadataLookup<F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static> {
+struct PgAsyncMetadataLookup {
     custom_oid: bool,
     generated_oids: GeneratedOidTypeMap,
-    oid_generator: F,
+    oid_generator: Box<dyn FnMut(&str, Option<&str>) -> (u32, u32) + 'static>,
 }
 
-impl<F> PgMetadataLookup for PgAsyncMetadataLookup<F>
-where
-    F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static,
-{
+impl PgMetadataLookup for PgAsyncMetadataLookup {
     fn lookup_type(&mut self, type_name: &str, schema: Option<&str>) -> PgTypeMetadata {
         self.custom_oid = true;
 
@@ -932,6 +931,29 @@ where
         };
 
         PgTypeMetadata::from_result(Ok(oid))
+    }
+
+    fn as_any<'a>(&mut self) -> &mut (dyn std::any::Any + 'a)
+    where
+        Self: 'a,
+    {
+        self
+    }
+}
+
+impl AsyncMultiConnectionHelper for AsyncPgConnection {
+    fn to_any<'a>(
+        lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+    ) -> &mut (dyn std::any::Any + 'a) {
+        lookup.as_any()
+    }
+
+    fn from_any(
+        lookup: &mut dyn std::any::Any,
+    ) -> Option<&mut <Self::Backend as diesel::sql_types::TypeMetadata>::MetadataLookup> {
+        lookup
+            .downcast_mut::<PgAsyncMetadataLookup>()
+            .map(|v| v as &mut dyn PgMetadataLookup)
     }
 }
 

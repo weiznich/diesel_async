@@ -10,6 +10,7 @@ mod errors;
 mod instrumentation;
 #[cfg(feature = "migrations")]
 mod migrations;
+mod multiconnection;
 mod notifications;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;

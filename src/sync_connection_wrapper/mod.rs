@@ -89,9 +89,10 @@ pub use self::implementation::SyncConnectionWrapper;
 pub use self::implementation::SyncTransactionManagerWrapper;
 
 mod implementation {
+    use crate::AsyncMultiConnectionHelper;
     use crate::{AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection, TransactionManager};
     use diesel::backend::{Backend, DieselReserveSpecialization};
-    use diesel::connection::{CacheSize, Instrumentation};
+    use diesel::connection::{CacheSize, Instrumentation, MultiConnectionHelper};
     use diesel::connection::{
         Connection, LoadConnection, TransactionManagerStatus, WithMetadataLookup,
     };
@@ -99,6 +100,7 @@ mod implementation {
         AsQuery, CollectedQuery, MoveableBindCollector, QueryBuilder, QueryFragment, QueryId,
     };
     use diesel::row::IntoOwnedRow;
+    use diesel::sql_types::TypeMetadata;
     use diesel::{ConnectionResult, QueryResult};
     use futures_core::stream::BoxStream;
     use futures_util::{FutureExt, StreamExt, TryFutureExt};
@@ -152,9 +154,8 @@ mod implementation {
         // SpawnBlocking bounds
         S: SpawnBlocking + Send,
     {
-        type LoadFuture<'conn, 'query> =
-            BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
-        type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
+        type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
+        type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
         type Stream<'conn, 'query> = BoxStream<'static, QueryResult<Self::Row<'conn, 'query>>>;
         type Row<'conn, 'query> = O;
         type Backend = <C as Connection>::Backend;
@@ -278,6 +279,40 @@ mod implementation {
             } else {
                 panic!("Cannot access shared cache")
             }
+        }
+    }
+
+    impl<C, S, MD, O> AsyncMultiConnectionHelper for SyncConnectionWrapper<C, S>
+    where
+        C: MultiConnectionHelper,
+        // Backend bounds
+        <C as Connection>::Backend: std::default::Default + DieselReserveSpecialization,
+        <C::Backend as Backend>::QueryBuilder: std::default::Default,
+        // Connection bounds
+        C: Connection + LoadConnection + WithMetadataLookup + 'static,
+        <C as Connection>::TransactionManager: Send,
+        // BindCollector bounds
+        MD: Send + 'static,
+        for<'a> <C::Backend as Backend>::BindCollector<'a>:
+            MoveableBindCollector<C::Backend, BindData = MD> + std::default::Default,
+        // Row bounds
+        O: 'static + Send + for<'conn> diesel::row::Row<'conn, C::Backend>,
+        for<'conn, 'query> <C as LoadConnection>::Row<'conn, 'query>:
+            IntoOwnedRow<'conn, <C as Connection>::Backend, OwnedRow = O>,
+        // SpawnBlocking bounds
+        S: SpawnBlocking + Send,
+    {
+        fn to_any<'a>(
+            lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+        ) -> &mut (dyn std::any::Any + 'a) {
+            C::to_any(lookup)
+        }
+
+        fn from_any(
+            lookup: &mut dyn std::any::Any,
+        ) -> Option<&mut <Self::Backend as diesel::sql_types::TypeMetadata>::MetadataLookup>
+        {
+            C::from_any(lookup)
         }
     }
 
