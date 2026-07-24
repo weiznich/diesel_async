@@ -4,6 +4,11 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
+## Unreleased
+
+* Add support for `#[derive(MultiConnection)]`
+* Bump minimal supported Rust version to 1.88.0
+
 ## [0.9.2] - 2026-06-19
 
 * Improve the check if a connection is still working in our connection pool implementation by actually loading the response
