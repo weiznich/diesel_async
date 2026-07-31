@@ -710,8 +710,9 @@ where
     Changes::Changeset: Send + 'b,
     Changes::Id: 'b,
     Tab::FromClause: Send,
-    diesel::dsl::Find<Changes::Table, Changes::Id>:
-        methods::LoadQuery<'b, crate::AsyncMysqlConnection, Output> + Send,
+    diesel::dsl::Find<Changes::Table, Changes::Id>: methods::LoadQuery<'b, crate::AsyncMysqlConnection, Output>
+        + RunQueryDsl<crate::AsyncMysqlConnection>
+        + Send,
 {
     fn update_and_fetch<'conn, 'changes>(
         &'conn mut self,
