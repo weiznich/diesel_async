@@ -583,13 +583,14 @@ pub trait RunQueryDsl<Conn>: Sized {
         U: Send + 'conn,
         Conn: AsyncConnectionCore,
         Self: diesel::query_dsl::methods::LimitDsl,
-        diesel::dsl::Limit<Self>: methods::LoadQuery<'query, Conn, U> + Send + 'query,
+        diesel::dsl::Limit<Self>:
+            methods::LoadQuery<'query, Conn, U> + RunQueryDsl<Conn> + Send + 'query,
     {
         diesel::query_dsl::methods::LimitDsl::limit(self, 1).get_result(conn)
     }
 }
 
-impl<T, Conn> RunQueryDsl<Conn> for T {}
+impl<T, Conn> RunQueryDsl<Conn> for T where T: diesel::query_dsl::RunQueryDslSupport {}
 
 /// Sugar for types which implement both `AsChangeset` and `Identifiable`
 ///
