@@ -1,14 +1,16 @@
 use diesel::prelude::{ExpressionMethods, OptionalExtension, QueryDsl};
 use diesel::QueryResult;
 use diesel_async::*;
-use scoped_futures::ScopedFutureExt;
 use std::fmt::Debug;
 
 #[cfg(feature = "postgres")]
 mod custom_types;
+#[cfg(feature = "postgres")]
+mod errors;
 mod instrumentation;
 #[cfg(feature = "migrations")]
 mod migrations;
+mod multiconnection;
 mod notifications;
 #[cfg(any(feature = "bb8", feature = "deadpool", feature = "mobc"))]
 mod pooling;
@@ -22,45 +24,39 @@ async fn transaction_test<C: AsyncConnection<Backend = TestBackend>>(
     conn: &mut C,
 ) -> QueryResult<()> {
     let res = conn
-        .transaction::<i32, diesel::result::Error, _>(|conn| {
-            async move {
-                let users: Vec<User> = users::table.load(conn).await?;
-                assert_eq!(&users[0].name, "John Doe");
-                assert_eq!(&users[1].name, "Jane Doe");
+        .transaction::<i32, diesel::result::Error, _>(async |conn| {
+            let users: Vec<User> = users::table.load(conn).await?;
+            assert_eq!(&users[0].name, "John Doe");
+            assert_eq!(&users[1].name, "Jane Doe");
 
-                let user: Option<User> = users::table.find(42).first(conn).await.optional()?;
-                assert_eq!(user, None::<User>);
+            let user: Option<User> = users::table.find(42).first(conn).await.optional()?;
+            assert_eq!(user, None::<User>);
 
-                let res = conn
-                    .transaction::<_, diesel::result::Error, _>(|conn| {
-                        async move {
-                            diesel::insert_into(users::table)
-                                .values(users::name.eq("Dave"))
-                                .execute(conn)
-                                .await?;
-                            let count = users::table.count().get_result::<i64>(conn).await?;
-                            assert_eq!(count, 3);
-                            Ok(())
-                        }
-                        .scope_boxed()
-                    })
-                    .await;
-                assert!(res.is_ok());
-                let count = users::table.count().get_result::<i64>(conn).await?;
-                assert_eq!(count, 3);
+            let res = conn
+                .transaction::<_, diesel::result::Error, _>(async |conn| {
+                    diesel::insert_into(users::table)
+                        .values(users::name.eq("Dave"))
+                        .execute(conn)
+                        .await?;
+                    let count = users::table.count().get_result::<i64>(conn).await?;
+                    assert_eq!(count, 3);
+                    Ok(())
+                })
+                .await;
+            assert!(res.is_ok());
+            let count = users::table.count().get_result::<i64>(conn).await?;
+            assert_eq!(count, 3);
 
-                let res = diesel::insert_into(users::table)
-                    .values(users::name.eq("Eve"))
-                    .execute(conn)
-                    .await?;
+            let res = diesel::insert_into(users::table)
+                .values(users::name.eq("Eve"))
+                .execute(conn)
+                .await?;
 
-                assert_eq!(res, 1, "Insert in transaction returned wrong result");
-                let count = users::table.count().get_result::<i64>(conn).await?;
-                assert_eq!(count, 4);
+            assert_eq!(res, 1, "Insert in transaction returned wrong result");
+            let count = users::table.count().get_result::<i64>(conn).await?;
+            assert_eq!(count, 4);
 
-                Err(diesel::result::Error::RollbackTransaction)
-            }
-            .scope_boxed()
+            Err(diesel::result::Error::RollbackTransaction)
         })
         .await;
     assert_eq!(
@@ -213,6 +209,21 @@ async fn mysql_cancel_token() {
         Ok(1) => {}
         Ok(_) => panic!("query completed successfully without cancellation"),
     }
+}
+
+#[cfg(feature = "sync-connection-wrapper")]
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_blocking_task() {
+    let mut conn = connection().await;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let future = conn.spawn_blocking(|_| {
+        tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        Ok(())
+    });
+    rx.await.unwrap();
+    std::mem::drop(future);
+    conn.transaction_state();
 }
 
 #[cfg(feature = "postgres")]

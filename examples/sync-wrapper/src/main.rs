@@ -53,17 +53,15 @@ async fn transaction(
     new_name: &str,
 ) -> Result<Vec<User>, diesel::result::Error> {
     async_conn
-        .transaction::<Vec<User>, diesel::result::Error, _>(|c| {
-            Box::pin(async {
-                if old_name.is_empty() {
-                    Ok(Vec::new())
-                } else {
-                    diesel::update(users::table.filter(users::name.eq(old_name)))
-                        .set(users::name.eq(new_name))
-                        .load(c)
-                        .await
-                }
-            })
+        .transaction::<Vec<User>, diesel::result::Error, _>(async |c| {
+            if old_name.is_empty() {
+                Ok(Vec::new())
+            } else {
+                diesel::update(users::table.filter(users::name.eq(old_name)))
+                    .set(users::name.eq(new_name))
+                    .load(c)
+                    .await
+            }
         })
         .await
 }

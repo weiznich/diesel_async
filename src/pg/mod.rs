@@ -8,6 +8,7 @@ use self::error_helper::ErrorHelper;
 use self::row::PgRow;
 use self::serialize::ToSqlHelper;
 use crate::stmt_cache::{CallbackHelper, QueryFragmentHelper};
+use crate::AsyncMultiConnectionHelper;
 use crate::{AnsiTransactionManager, AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection};
 use diesel::connection::statement_cache::{
     PrepareForCache, QueryFragmentForCachedStatement, StatementCache,
@@ -21,6 +22,7 @@ use diesel::pg::{
 use diesel::query_builder::bind_collector::RawBytesBindCollector;
 use diesel::query_builder::{AsQuery, QueryBuilder, QueryFragment, QueryId};
 use diesel::result::{DatabaseErrorKind, Error};
+use diesel::sql_types::TypeMetadata;
 use diesel::{ConnectionError, ConnectionResult, QueryResult};
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
@@ -165,10 +167,10 @@ const FAKE_OID: u32 = 0;
 ///
 /// [tokio_postgres_rustls]: https://docs.rs/tokio-postgres-rustls/0.12.0/tokio_postgres_rustls/
 pub struct AsyncPgConnection {
-    conn: Arc<tokio_postgres::Client>,
-    stmt_cache: Arc<Mutex<StatementCache<diesel::pg::Pg, Statement>>>,
-    transaction_state: Arc<Mutex<AnsiTransactionManager>>,
-    metadata_cache: Arc<Mutex<PgMetadataCache>>,
+    conn: tokio_postgres::Client,
+    stmt_cache: Mutex<StatementCache<diesel::pg::Pg, Statement>>,
+    transaction_state: Mutex<AnsiTransactionManager>,
+    metadata_cache: Mutex<PgMetadataCache>,
     connection_future: Option<broadcast::Receiver<Arc<tokio_postgres::Error>>>,
     notification_rx: Option<mpsc::UnboundedReceiver<QueryResult<diesel::pg::PgNotification>>>,
     shutdown_channel: Option<oneshot::Sender<()>>,
@@ -305,14 +307,7 @@ impl AsyncConnection for AsyncPgConnection {
     }
 
     fn transaction_state(&mut self) -> &mut AnsiTransactionManager {
-        // there should be no other pending future when this is called
-        // that means there is only one instance of this arc and
-        // we can simply access the inner data
-        if let Some(tm) = Arc::get_mut(&mut self.transaction_state) {
-            tm.get_mut()
-        } else {
-            panic!("Cannot access shared transaction state")
-        }
+        self.transaction_state.get_mut()
     }
 
     fn instrumentation(&mut self) -> &mut dyn Instrumentation {
@@ -331,14 +326,7 @@ impl AsyncConnection for AsyncPgConnection {
     }
 
     fn set_prepared_statement_cache_size(&mut self, size: CacheSize) {
-        // there should be no other pending future when this is called
-        // that means there is only one instance of this arc and
-        // we can simply access the inner data
-        if let Some(cache) = Arc::get_mut(&mut self.stmt_cache) {
-            cache.get_mut().set_cache_size(size)
-        } else {
-            panic!("Cannot access shared statement cache")
-        }
+        self.stmt_cache.get_mut().set_cache_size(size)
     }
 }
 
@@ -351,7 +339,7 @@ impl Drop for AsyncPgConnection {
 }
 
 async fn load_prepared(
-    conn: Arc<tokio_postgres::Client>,
+    conn: &tokio_postgres::Client,
     stmt: Statement,
     binds: Vec<ToSqlHelper>,
 ) -> QueryResult<BoxStream<'static, QueryResult<PgRow>>> {
@@ -364,7 +352,7 @@ async fn load_prepared(
 }
 
 async fn execute_prepared(
-    conn: Arc<tokio_postgres::Client>,
+    conn: &tokio_postgres::Client,
     stmt: Statement,
     binds: Vec<ToSqlHelper>,
 ) -> QueryResult<usize> {
@@ -373,7 +361,7 @@ async fn execute_prepared(
         .map(|b| b as &(dyn ToSql + Sync))
         .collect::<Vec<_>>();
 
-    let res = tokio_postgres::Client::execute(&conn, &stmt, &binds as &[_])
+    let res = tokio_postgres::Client::execute(conn, &stmt, &binds as &[_])
         .await
         .map_err(ErrorHelper)?;
     res.try_into()
@@ -397,13 +385,13 @@ fn update_transaction_manager_status<T>(
     query_result
 }
 
-fn prepare_statement_helper(
-    conn: Arc<tokio_postgres::Client>,
+fn prepare_statement_helper<'conn>(
+    conn: &'conn tokio_postgres::Client,
     sql: &str,
     _is_for_cache: PrepareForCache,
     metadata: &[PgTypeMetadata],
 ) -> CallbackHelper<
-    impl Future<Output = QueryResult<(Statement, Arc<tokio_postgres::Client>)>> + Send,
+    impl Future<Output = QueryResult<(Statement, &'conn tokio_postgres::Client)>> + Send,
 > {
     let bind_types = metadata
         .iter()
@@ -452,7 +440,6 @@ impl AsyncPgConnection {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
-    /// # use scoped_futures::ScopedFutureExt;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -466,7 +453,7 @@ impl AsyncPgConnection {
     ///     .read_only()
     ///     .serializable()
     ///     .deferrable()
-    ///     .run(|conn| async move { Ok(()) }.scope_boxed())
+    ///     .run(async |conn| Ok(()))
     ///     .await
     /// # }
     /// ```
@@ -519,10 +506,10 @@ impl AsyncPgConnection {
         instrumentation: Arc<std::sync::Mutex<DynInstrumentation>>,
     ) -> ConnectionResult<Self> {
         let mut conn = Self {
-            conn: Arc::new(conn),
-            stmt_cache: Arc::new(Mutex::new(StatementCache::new())),
-            transaction_state: Arc::new(Mutex::new(AnsiTransactionManager::default())),
-            metadata_cache: Arc::new(Mutex::new(PgMetadataCache::new())),
+            conn,
+            stmt_cache: Mutex::new(StatementCache::new()),
+            transaction_state: Mutex::new(AnsiTransactionManager::default()),
+            metadata_cache: Mutex::new(PgMetadataCache::new()),
             connection_future,
             notification_rx,
             shutdown_channel,
@@ -559,9 +546,9 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement<'a, T, F, R>(
-        &self,
+        &'a self,
         query: T,
-        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
+        callback: fn(&'a tokio_postgres::Client, Statement, Vec<ToSqlHelper>) -> F,
     ) -> BoxFuture<'a, QueryResult<R>>
     where
         T: QueryFragment<diesel::pg::Pg> + QueryId,
@@ -594,8 +581,8 @@ impl AsyncPgConnection {
     }
 
     fn with_prepared_statement_after_sql_built<'a, F, R>(
-        &self,
-        callback: fn(Arc<tokio_postgres::Client>, Statement, Vec<ToSqlHelper>) -> F,
+        &'a self,
+        callback: fn(&'a tokio_postgres::Client, Statement, Vec<ToSqlHelper>) -> F,
         is_safe_to_cache_prepared: QueryResult<bool>,
         query_id: Option<std::any::TypeId>,
         to_sql_result: QueryResult<()>,
@@ -606,10 +593,10 @@ impl AsyncPgConnection {
         F: Future<Output = QueryResult<R>> + Send + 'a,
         R: Send,
     {
-        let raw_connection = self.conn.clone();
-        let stmt_cache = self.stmt_cache.clone();
-        let metadata_cache = self.metadata_cache.clone();
-        let tm = self.transaction_state.clone();
+        let raw_connection = &self.conn;
+        let stmt_cache = &self.stmt_cache;
+        let metadata_cache = &self.metadata_cache;
+        let tm = &self.transaction_state;
         let instrumentation = self.instrumentation.clone();
         let BindData {
             collect_bind_result,
@@ -647,7 +634,7 @@ impl AsyncPgConnection {
                         type_metadata
                     } else {
                         let type_metadata =
-                            lookup_type(schema.clone(), lookup_type_name.clone(), &raw_connection)
+                            lookup_type(schema.clone(), lookup_type_name.clone(), raw_connection)
                                 .await?;
                         metadata_cache.store_type(cache_key, type_metadata);
 
@@ -689,7 +676,7 @@ impl AsyncPgConnection {
                         &helper,
                         &Pg,
                         &bind_collector.metadata,
-                        raw_connection.clone(),
+                        raw_connection,
                         prepare_statement_helper,
                         &mut move |event: InstrumentationEvent<'_>| {
                             // we wrap this lock into another callback to prevent locking
@@ -750,7 +737,6 @@ impl AsyncPgConnection {
     ///
     /// ```rust
     /// # include!("../doctest_setup.rs");
-    /// # use scoped_futures::ScopedFutureExt;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -808,7 +794,7 @@ fn construct_bind_data(query: &dyn QueryFragment<diesel::pg::Pg>) -> BindData {
     let mut metadata_lookup_0 = PgAsyncMetadataLookup {
         custom_oid: false,
         generated_oids: None,
-        oid_generator: |_, _| (FAKE_OID, FAKE_OID),
+        oid_generator: Box::new(|_, _| (FAKE_OID, FAKE_OID)),
     };
     let collect_bind_result_0 =
         query.collect_binds(&mut bind_collector_0, &mut metadata_lookup_0, &Pg);
@@ -840,10 +826,10 @@ fn construct_bind_data(query: &dyn QueryFragment<diesel::pg::Pg>) -> BindData {
         let mut metadata_lookup_1 = PgAsyncMetadataLookup {
             custom_oid: false,
             generated_oids: Some(HashMap::new()),
-            oid_generator: move |_, _| {
+            oid_generator: Box::new(move |_, _| {
                 max_oid += 2;
                 (max_oid, max_oid + 1)
-            },
+            }),
         };
         let collect_bind_result_1 =
             query.collect_binds(&mut bind_collector_1, &mut metadata_lookup_1, &Pg);
@@ -927,16 +913,13 @@ type GeneratedOidTypeMap = Option<HashMap<(Option<String>, String), (u32, u32)>>
 
 /// Collects types that need to be looked up, and causes fake OIDs to be written into the bind collector
 /// so they can be replaced with asynchronously fetched OIDs after the original query is dropped
-struct PgAsyncMetadataLookup<F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static> {
+struct PgAsyncMetadataLookup {
     custom_oid: bool,
     generated_oids: GeneratedOidTypeMap,
-    oid_generator: F,
+    oid_generator: Box<dyn FnMut(&str, Option<&str>) -> (u32, u32) + 'static>,
 }
 
-impl<F> PgMetadataLookup for PgAsyncMetadataLookup<F>
-where
-    F: FnMut(&str, Option<&str>) -> (u32, u32) + 'static,
-{
+impl PgMetadataLookup for PgAsyncMetadataLookup {
     fn lookup_type(&mut self, type_name: &str, schema: Option<&str>) -> PgTypeMetadata {
         self.custom_oid = true;
 
@@ -948,6 +931,29 @@ where
         };
 
         PgTypeMetadata::from_result(Ok(oid))
+    }
+
+    fn as_any<'a>(&mut self) -> &mut (dyn std::any::Any + 'a)
+    where
+        Self: 'a,
+    {
+        self
+    }
+}
+
+impl AsyncMultiConnectionHelper for AsyncPgConnection {
+    fn to_any<'a>(
+        lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+    ) -> &mut (dyn std::any::Any + 'a) {
+        lookup.as_any()
+    }
+
+    fn from_any(
+        lookup: &mut dyn std::any::Any,
+    ) -> Option<&mut <Self::Backend as diesel::sql_types::TypeMetadata>::MetadataLookup> {
+        lookup
+            .downcast_mut::<PgAsyncMetadataLookup>()
+            .map(|v| v as &mut dyn PgMetadataLookup)
     }
 }
 
@@ -1101,7 +1107,6 @@ mod tests {
     use diesel::sql_types::Integer;
     use diesel::IntoSql;
     use futures_util::future::try_join;
-    use scoped_futures::ScopedFutureExt;
 
     #[tokio::test]
     async fn pipelining() {
@@ -1186,27 +1191,24 @@ mod tests {
             try_join(f3, try_join(f4, try_join(f5, try_join(f6, f7)))).await
         }
 
-        conn.transaction(|conn| {
-            async move {
-                let f12 = fn12(conn);
-                let f37 = fn37(conn);
+        conn.transaction(async |conn| {
+            let f12 = fn12(conn);
+            let f37 = fn37(conn);
 
-                let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
+            let ((r1, r2), (r3, (r4, (r5, (r6, r7))))) = try_join(f12, f37).await.unwrap();
 
-                assert_eq!(r1, 1);
-                assert_eq!(r2, 2);
-                assert_eq!(r3, 1);
-                assert_eq!(r4, vec![4]);
-                assert_eq!(r5, 5);
-                assert_eq!(r6, vec![6]);
-                assert_eq!(r7, 7);
+            assert_eq!(r1, 1);
+            assert_eq!(r2, 2);
+            assert_eq!(r3, 1);
+            assert_eq!(r4, vec![4]);
+            assert_eq!(r5, 5);
+            assert_eq!(r6, vec![6]);
+            assert_eq!(r7, 7);
 
-                fn12(conn).await?;
-                fn37(conn).await?;
+            fn12(conn).await?;
+            fn37(conn).await?;
 
-                QueryResult::<_>::Ok(())
-            }
-            .scope_boxed()
+            QueryResult::<_>::Ok(())
         })
         .await
         .unwrap();

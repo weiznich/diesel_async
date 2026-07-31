@@ -12,6 +12,15 @@ on:
       - 0.2.x
 
 name: CI Tests
+permissions:
+  contents: "read"
+env:
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  # Force HTTP/1.1 for crates.io downloads: HTTP/2 multiplexing against the
+  # CDN intermittently drops connections mid-stream (SSL "unexpected eof"),
+  # and cargo does not retry those, so CARGO_NET_RETRY alone cannot recover.
+  CARGO_HTTP_MULTIPLEXING: "false"
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 # This will ensure that only one commit will be running tests at a time on each PR.
@@ -31,11 +40,25 @@ jobs:
           [
             ubuntu-latest,
             macos-15-intel,
-            macos-15,
+            macos-26,
             windows-latest,
-            ubuntu-22.04-arm,
+            ubuntu-24.04-arm,
           ]
+        exclude:
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
         include:
+          # Adding two extra jobs for the single one exlucded above with pinned postgres versions
+          # as there is a change in behaviour (see `restrict_violation_error_kind` test)
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "17"
+          - rust: "stable"
+            backend: "postgres"
+            os: "ubuntu-latest"
+            pg_version: "18"
           - rust: "beta"
             backend: "postgres"
             os: "ubuntu-latest"
@@ -57,10 +80,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@f51f967e158417aafa338a1e46ab22095f07aa01 # v2.8.2
         with:
           key: ${{ runner.os }}-${{ matrix.backend }}-cargo-${{ hashFiles('**/Cargo.toml') }}
 
@@ -83,19 +108,32 @@ jobs:
           echo "RUSTFLAGS=-D warnings" >> $GITHUB_ENV
           echo "RUSTDOCFLAGS=-D warnings" >> $GITHUB_ENV
 
-      - uses: ilammy/setup-nasm@v1
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
         if: matrix.backend == 'postgres' && matrix.os == 'windows-latest'
 
       - name: Install postgres (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'postgres'
+        env:
+          PG_VERSION: ${{ matrix.pg_version }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql
-          echo "host    all             all             127.0.0.1/32            md5" > sudo tee -a /etc/postgresql/10/main/pg_hba.conf
-          sudo service postgresql restart && sleep 3
-          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-          sudo service postgresql restart && sleep 3
-          echo "DATABASE_URL=postgres://postgres:postgres@localhost/" >> $GITHUB_ENV
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
+          if [ -n "$PG_VERSION" ]; then
+            # See https://www.postgresql.org/download/linux/ubuntu/
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql-common
+            sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y "postgresql-$PG_VERSION"
+            sudo pg_dropcluster --stop "$PG_VERSION" main 2>/dev/null || true
+            sudo pg_createcluster "$PG_VERSION" main
+            sudo pg_ctlcluster --skip-systemctl-redirect "$PG_VERSION" main start
+            port=$(pg_lsclusters -h | awk -v v="$PG_VERSION" '$1 == v {print $3}')
+          else
+            sudo apt-get -o DPkg::Lock::Timeout=300 install -y postgresql
+            sudo service postgresql restart
+            port=5432
+          fi
+          sleep 3
+          sudo -u postgres psql -p "$port" -c "ALTER USER postgres PASSWORD 'postgres';"
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:$port/" >> "$GITHUB_ENV"
 
       - name: Install mysql (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'mysql'
@@ -107,8 +145,8 @@ jobs:
       - name: Install sqlite (Linux)
         if: runner.os == 'Linux' && matrix.backend == 'sqlite'
         run: |
-          sudo apt-get update
-          sudo apt-get install libsqlite3-dev
+          sudo apt-get -o DPkg::Lock::Timeout=300 update
+          sudo apt-get -o DPkg::Lock::Timeout=300 install libsqlite3-dev
           echo "DATABASE_URL=:memory:" >> $GITHUB_ENV
 
       - name: Install postgres (MacOS)
@@ -138,7 +176,7 @@ jobs:
           echo "DATABASE_URL=mysql://runner:diesel@localhost/diesel_test" >> $GITHUB_ENV
 
       - name: Install mysql (MacOS M1)
-        if: matrix.os == 'macos-15' && matrix.backend == 'mysql'
+        if: matrix.os == 'macos-26' && matrix.backend == 'mysql'
         run: |
           brew install mariadb@11.4
           ls /opt/homebrew/opt/mariadb@11.4
@@ -158,10 +196,15 @@ jobs:
 
       - name: Install mysql (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'mysql'
-        shell: cmd
+        shell: bash
         run: |
-          choco install mysql
-          "C:\tools\mysql\current\bin\mysql" -e "create database diesel_test; create database diesel_unit_test; grant all on `diesel_%`.* to 'root'@'localhost';" -uroot
+          mkdir "C:\\Program Files\\MySQL\\MySQL Server 8.0\\data\\"
+          "C:\\Program Files\\MySQL\MySQL Server 8.0\\bin\\mysqld" --console --initialize --initialize-insecure
+          "C:\\Program Files\\MySQL\MySQL Server 8.0\\bin\\mysqld" --console &
+          sleep 15
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e "create database diesel_test;" -u root
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e "create database diesel_unit_test;" -u root
+          "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql" -e 'grant all on `diesel_%`.* to 'root'@'localhost';' -uroot
 
       - name: Set variables for mysql (Windows)
         if: runner.os == 'Windows' && matrix.backend == 'mysql'
@@ -175,7 +218,7 @@ jobs:
         run: |
           choco install sqlite
           cd /D C:\ProgramData\chocolatey\lib\SQLite\tools
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
           lib /machine:x64 /def:sqlite3.def /out:sqlite3.lib
 
       - name: Set variables for sqlite (Windows)
@@ -186,37 +229,46 @@ jobs:
           echo "SQLITE3_LIB_DIR=C:\ProgramData\chocolatey\lib\SQLite\tools" >> $GITHUB_ENV
           echo "DATABASE_URL=:memory:" >> $GITHUB_ENV
 
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
       - name: Rust version check
-        run: cargo +${{ matrix.rust }} version
+        env:
+          RUST: ${{ matrix.rust }}
+        run: |
+          rustup override set $RUST
+          cargo --version
+          rustc --version
 
       - name: Test diesel_async
-        run: cargo +${{ matrix.rust }} test --manifest-path Cargo.toml --no-default-features --features "${{ matrix.backend }} deadpool bb8 mobc async-connection-wrapper migrations"
+        shell: bash
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          cargo test --manifest-path Cargo.toml --no-default-features -F "$BACKEND" --features "deadpool bb8 mobc async-connection-wrapper migrations"
 
       - name: Run examples (Postgres)
         if: matrix.backend == 'postgres'
         run: |
-          cargo +${{ matrix.rust }} check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
-          cargo +${{ matrix.rust }} check --manifest-path examples/postgres/run-pending-migrations-with-rustls/Cargo.toml
+          cargo check --manifest-path examples/postgres/pooled-with-rustls/Cargo.toml
+          cargo check --manifest-path examples/postgres/run-pending-migrations-with-rustls/Cargo.toml
 
       - name: Run examples (Sqlite)
         if: matrix.backend == 'sqlite'
         run: |
-          cargo +${{ matrix.rust }} check --manifest-path examples/sync-wrapper/Cargo.toml
+          cargo check --manifest-path examples/sync-wrapper/Cargo.toml
 
   rustfmt_and_clippy:
     name: Check rustfmt style && run clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          components: clippy, rustfmt
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup override set stable
+          rustup component add rustfmt clippy
       - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@f51f967e158417aafa338a1e46ab22095f07aa01 # v2.8.2
         with:
           key: clippy-cargo-${{ hashFiles('**/Cargo.toml') }}
 
@@ -229,29 +281,41 @@ jobs:
       - name: Run clippy
         run: cargo +stable clippy --all --all-features
 
-      - name: Check formating
+      - name: Check formatting
         run: cargo +stable fmt --all -- --check
   minimal_rust_version:
-    name: Check Minimal supported rust version (1.86.0)
+    name: Check Minimal supported rust version (1.88.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.86.0
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup update nightly
+      - uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        with:
+          tool: cargo-hack, cargo-minimal-versions
       - name: Check diesel-async
         # cannot test mysql yet as that crate
         # has broken min-version dependencies
         # cannot test sqlite yet as that crate
         # as broken min-version dependencies as well
-        run: cargo +1.86.0 minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
+        run: cargo +1.88.0 minimal-versions check -p diesel-async --features "postgres bb8 deadpool mobc"
   all_features_build:
     name: Check all feature combination build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        run: |
+          rustup update stable
+          rustup override set stable
+      - uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        with:
+          tool: cargo-hack
       - name: Check feature combinations
         run: cargo hack check --feature-powerset --no-dev-deps --depth 2

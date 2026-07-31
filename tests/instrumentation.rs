@@ -204,7 +204,7 @@ async fn check_events_are_emitted_for_load_repeat_does_not_repeat_cache() {
 #[tokio::test]
 async fn check_events_transaction() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    conn.transaction(|_conn| Box::pin(async { QueryResult::Ok(()) }))
+    conn.transaction(async |_conn| QueryResult::Ok(()))
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();
@@ -221,8 +221,8 @@ async fn check_events_transaction() {
 async fn check_events_transaction_error() {
     let (events_to_check, mut conn) = setup_test_case().await;
     let _ = conn
-        .transaction(|_conn| {
-            Box::pin(async { QueryResult::<()>::Err(diesel::result::Error::RollbackTransaction) })
+        .transaction(async |_conn| {
+            QueryResult::<()>::Err(diesel::result::Error::RollbackTransaction)
         })
         .await;
     let events = events_to_check.lock().unwrap();
@@ -238,14 +238,9 @@ async fn check_events_transaction_error() {
 #[tokio::test]
 async fn check_events_transaction_nested() {
     let (events_to_check, mut conn) = setup_test_case().await;
-    conn.transaction(|conn| {
-        Box::pin(async move {
-            conn.transaction(|_conn| Box::pin(async { QueryResult::Ok(()) }))
-                .await
-        })
-    })
-    .await
-    .unwrap();
+    conn.transaction(async |conn| conn.transaction(async |_conn| QueryResult::Ok(())).await)
+        .await
+        .unwrap();
     let events = events_to_check.lock().unwrap();
     assert_eq!(events.len(), 12, "{events:?}");
     assert_matches!(events[0], Event::BeginTransaction { .. });
@@ -267,12 +262,11 @@ async fn check_events_transaction_nested() {
 async fn check_events_transaction_builder() {
     use crate::connection_without_transaction;
     use diesel::result::Error;
-    use scoped_futures::ScopedFutureExt;
 
     let (events_to_check, mut conn) =
         setup_test_case_with_connection(connection_without_transaction().await);
     conn.build_transaction()
-        .run(|_tx| async move { Ok::<(), Error>(()) }.scope_boxed())
+        .run(async |_tx| Ok::<(), Error>(()))
         .await
         .unwrap();
     let events = events_to_check.lock().unwrap();

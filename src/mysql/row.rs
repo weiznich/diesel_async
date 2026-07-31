@@ -75,11 +75,7 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
                     MysqlTimestampType::MYSQL_TIMESTAMP_TIME,
                     0,
                 );
-                let buffer = unsafe {
-                    let ptr = &date as *const MysqlTime as *const u8;
-                    let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<MysqlTime>());
-                    slice.to_vec()
-                };
+                let buffer = date.serialize().to_vec();
                 Some(Cow::Owned(buffer))
             }
             Value::Date(year, month, day, hour, minute, second, second_part) => {
@@ -95,11 +91,7 @@ impl<'a> diesel::row::Row<'a, Mysql> for MysqlRow {
                     MysqlTimestampType::MYSQL_TIMESTAMP_DATETIME,
                     0,
                 );
-                let buffer = unsafe {
-                    let ptr = &date as *const MysqlTime as *const u8;
-                    let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<MysqlTime>());
-                    slice.to_vec()
-                };
+                let buffer = date.serialize().to_vec();
                 Some(Cow::Owned(buffer))
             }
             _t => {

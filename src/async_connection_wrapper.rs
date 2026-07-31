@@ -315,8 +315,8 @@ pub(crate) mod implementation {
         C: crate::AsyncConnection<Backend = <Self as diesel::Connection>::Backend>
             + crate::pooled_connection::PoolableConnection
             + 'static,
-        diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
-            crate::methods::ExecuteDsl<C>,
+        for<'a> diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+            crate::methods::LoadQuery<'a, C, i32>,
         diesel::query_builder::SqlQuery: crate::methods::ExecuteDsl<C>,
     {
         fn ping(&mut self) -> diesel::QueryResult<()> {

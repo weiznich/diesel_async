@@ -89,9 +89,10 @@ pub use self::implementation::SyncConnectionWrapper;
 pub use self::implementation::SyncTransactionManagerWrapper;
 
 mod implementation {
+    use crate::AsyncMultiConnectionHelper;
     use crate::{AsyncConnection, AsyncConnectionCore, SimpleAsyncConnection, TransactionManager};
     use diesel::backend::{Backend, DieselReserveSpecialization};
-    use diesel::connection::{CacheSize, Instrumentation};
+    use diesel::connection::{CacheSize, Instrumentation, MultiConnectionHelper};
     use diesel::connection::{
         Connection, LoadConnection, TransactionManagerStatus, WithMetadataLookup,
     };
@@ -99,6 +100,7 @@ mod implementation {
         AsQuery, CollectedQuery, MoveableBindCollector, QueryBuilder, QueryFragment, QueryId,
     };
     use diesel::row::IntoOwnedRow;
+    use diesel::sql_types::TypeMetadata;
     use diesel::{ConnectionResult, QueryResult};
     use futures_core::stream::BoxStream;
     use futures_util::{FutureExt, StreamExt, TryFutureExt};
@@ -152,9 +154,8 @@ mod implementation {
         // SpawnBlocking bounds
         S: SpawnBlocking + Send,
     {
-        type LoadFuture<'conn, 'query> =
-            BoxFuture<'query, QueryResult<Self::Stream<'conn, 'query>>>;
-        type ExecuteFuture<'conn, 'query> = BoxFuture<'query, QueryResult<usize>>;
+        type LoadFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<Self::Stream<'conn, 'query>>>;
+        type ExecuteFuture<'conn, 'query> = BoxFuture<'conn, QueryResult<usize>>;
         type Stream<'conn, 'query> = BoxStream<'static, QueryResult<Self::Row<'conn, 'query>>>;
         type Row<'conn, 'query> = O;
         type Backend = <C as Connection>::Backend;
@@ -278,6 +279,40 @@ mod implementation {
             } else {
                 panic!("Cannot access shared cache")
             }
+        }
+    }
+
+    impl<C, S, MD, O> AsyncMultiConnectionHelper for SyncConnectionWrapper<C, S>
+    where
+        C: MultiConnectionHelper,
+        // Backend bounds
+        <C as Connection>::Backend: std::default::Default + DieselReserveSpecialization,
+        <C::Backend as Backend>::QueryBuilder: std::default::Default,
+        // Connection bounds
+        C: Connection + LoadConnection + WithMetadataLookup + 'static,
+        <C as Connection>::TransactionManager: Send,
+        // BindCollector bounds
+        MD: Send + 'static,
+        for<'a> <C::Backend as Backend>::BindCollector<'a>:
+            MoveableBindCollector<C::Backend, BindData = MD> + std::default::Default,
+        // Row bounds
+        O: 'static + Send + for<'conn> diesel::row::Row<'conn, C::Backend>,
+        for<'conn, 'query> <C as LoadConnection>::Row<'conn, 'query>:
+            IntoOwnedRow<'conn, <C as Connection>::Backend, OwnedRow = O>,
+        // SpawnBlocking bounds
+        S: SpawnBlocking + Send,
+    {
+        fn to_any<'a>(
+            lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+        ) -> &mut (dyn std::any::Any + 'a) {
+            C::to_any(lookup)
+        }
+
+        fn from_any(
+            lookup: &mut dyn std::any::Any,
+        ) -> Option<&mut <Self::Backend as diesel::sql_types::TypeMetadata>::MetadataLookup>
+        {
+            C::from_any(lookup)
         }
     }
 
@@ -495,8 +530,14 @@ mod implementation {
             R: Send + 'static,
         {
             let fut = match self {
-                Tokio::Handle(handle) => handle.spawn_blocking(task),
-                Tokio::Runtime(runtime) => runtime.spawn_blocking(task),
+                Tokio::Handle(handle) => CancelWrapper {
+                    future: handle.spawn_blocking(task),
+                    handle: handle.clone(),
+                },
+                Tokio::Runtime(runtime) => CancelWrapper {
+                    future: runtime.spawn_blocking(task),
+                    handle: runtime.handle().clone(),
+                },
             };
 
             fut.map_err(Box::from).boxed()
@@ -511,6 +552,42 @@ mod implementation {
                     .unwrap();
 
                 Tokio::Runtime(runtime)
+            }
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    use std::pin::Pin;
+
+    #[cfg(feature = "tokio")]
+    /// Wrapper around a task that makes sure it finishes before the Future gets cancelled
+    struct CancelWrapper<R> {
+        handle: tokio::runtime::Handle,
+        future: tokio::task::JoinHandle<R>,
+    }
+
+    #[cfg(feature = "tokio")]
+    impl<R> std::future::Future for CancelWrapper<R> {
+        type Output = Result<R, tokio::task::JoinError>;
+
+        fn poll(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            let future = Pin::new(&mut self.get_mut().future);
+            future.poll(cx)
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    impl<R> Drop for CancelWrapper<R> {
+        fn drop(&mut self) {
+            let future = Pin::new(&mut self.future);
+            if !future.is_finished() {
+                tokio::task::block_in_place(|| {
+                    // we don't care about the result, just make sure the task is finished before continuing
+                    let _ = self.handle.block_on(future);
+                });
             }
         }
     }

@@ -4,7 +4,35 @@ All user visible changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/), as described
 for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/text/1105-api-evolution.md)
 
-## [Unreleased]
+## Unreleased
+
+* Add support for `#[derive(MultiConnection)]`
+* Bump minimal supported Rust version to 1.88.0
+
+## [0.9.2] - 2026-06-19
+
+* Improve the check if a connection is still working in our connection pool implementation by actually loading the response
+* Improve mapping of SQL error states to diesel database error kinds for PostgreSQL 18 and newer
+
+## [0.9.1] - 2026-06-05
+
+* Correctly check if a connection is a broken state (e.g. has an open transaction) for the mobc pool implementation
+
+## [0.9.0] - 2026-04-30
+
+* Change all transaction related functions to accept an real async closure instead of 
+  the scoped boxed variant. This change requires adujsting all call sides of transaction 
+  based functions from `conn.transaction(|conn| async move {/* your code */}.scoped_boxed())`
+  to `conn.transaction(async |conn| /* your code */)`
+* Fixed an unsound access to padding values while deserializing Date/Time values in the mysql backend
+  Thanks to Paolo Barbolini for finding this issue.
+  
+## [0.8.0] - 2026-03-20
+
+* Added support for UpdateAndFetchResults for `SyncConnectionWrapper`, allowing to use `save_changes`
+* Bumped supported deadpool version to 0.13
+* Fixed a bug with postgres query pipelining that can cause panics
+* Fixed a bug with the `SyncConnectionWrapper` that can cause panics if the future is dropped before completion
 
 ## [0.7.4] - 2025-11-07
 
@@ -128,4 +156,9 @@ in the pool should be checked if they are still valid
 [0.7.1]: https://github.com/weiznich/diesel_async/compare/v0.7.0...v0.7.1
 [0.7.2]: https://github.com/weiznich/diesel_async/compare/v0.7.1...v0.7.2
 [0.7.3]: https://github.com/weiznich/diesel_async/compare/v0.7.2...v0.7.3
-[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.7.0...main
+[0.7.4]: https://github.com/weiznich/diesel_async/compare/v0.7.3...v0.7.4
+[0.8.0]: https://github.com/weiznich/diesel_async/compare/v0.7.4...v0.8.0
+[0.9.0]: https://github.com/weiznich/diesel_async/compare/v0.8.0...v0.9.0
+[0.9.1]: https://github.com/diesel-rs/diesel_async/compare/v0.9.0...v0.9.1
+[0.9.2]: https://github.com/diesel-rs/diesel_async/compare/v0.9.1...v0.9.2
+[Unreleased]: https://github.com/weiznich/diesel_async/compare/v0.9.0...main

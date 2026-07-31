@@ -70,8 +70,8 @@ pub type Builder<C> = mobc::Builder<AsyncDieselConnectionManager<C>>;
 impl<C> Manager for AsyncDieselConnectionManager<C>
 where
     C: PoolableConnection + 'static,
-    diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
-        crate::methods::ExecuteDsl<C>,
+    for<'a> diesel::dsl::select<diesel::dsl::AsExprOf<i32, diesel::sql_types::Integer>>:
+        crate::methods::LoadQuery<'a, C, i32>,
     diesel::query_builder::SqlQuery: QueryFragment<C::Backend>,
 {
     type Connection = C;
@@ -89,5 +89,9 @@ where
             .await
             .map_err(PoolError::QueryError)?;
         Ok(conn)
+    }
+
+    fn validate(&self, conn: &mut Self::Connection) -> bool {
+        std::thread::panicking() || conn.is_broken()
     }
 }

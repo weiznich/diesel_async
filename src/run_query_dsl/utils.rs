@@ -5,17 +5,21 @@ use std::task::{Context, Poll};
 use diesel::QueryResult;
 use futures_core::{ready, TryFuture, TryStream};
 use futures_util::{TryFutureExt, TryStreamExt};
+use pin_project_lite::pin_project;
 
 // We use a custom future implementation here to erase some lifetimes
 // that otherwise need to be specified explicitly
 //
-// Specifying these lifetimes results in the compiler not beeing
+// Specifying these lifetimes results in the compiler not being
 // able to look through the generic code and emit
 // lifetime erros for pipelined queries. See
 // https://github.com/weiznich/diesel_async/issues/249 for more context
-#[repr(transparent)]
-pub struct MapOk<F: TryFutureExt, T> {
-    future: futures_util::future::MapOk<F, fn(F::Ok) -> T>,
+pin_project! {
+    #[repr(transparent)]
+    pub struct MapOk<F: TryFutureExt, T> {
+        #[pin]
+        future: futures_util::future::MapOk<F, fn(F::Ok) -> T>,
+    }
 }
 
 impl<F, T> Future for MapOk<F, T>
@@ -26,12 +30,7 @@ where
     type Output = Result<T, F::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        unsafe {
-            // SAFETY: This projects pinning to the only inner field, so it
-            // should be safe
-            self.map_unchecked_mut(|s| &mut s.future)
-        }
-        .poll(cx)
+        self.project().future.poll(cx)
     }
 }
 
@@ -44,9 +43,12 @@ impl<Fut: TryFutureExt, T> MapOk<Fut, T> {
 }
 
 // similar to `MapOk` above this mainly exists to hide the lifetime
-#[repr(transparent)]
-pub struct AndThen<F1: TryFuture, F2> {
-    future: futures_util::future::AndThen<F1, F2, fn(F1::Ok) -> F2>,
+pin_project! {
+    #[repr(transparent)]
+    pub struct AndThen<F1: TryFuture, F2> {
+        #[pin]
+        future: futures_util::future::AndThen<F1, F2, fn(F1::Ok) -> F2>,
+    }
 }
 
 impl<Fut1, Fut2> AndThen<Fut1, Fut2>
@@ -69,12 +71,7 @@ where
     type Output = Result<F2::Ok, F2::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        unsafe {
-            // SAFETY: This projects pinning to the only inner field, so it
-            // should be safe
-            self.map_unchecked_mut(|s| &mut s.future)
-        }
-        .poll(cx)
+        self.project().future.poll(cx)
     }
 }
 

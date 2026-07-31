@@ -97,15 +97,13 @@ use diesel::backend::Backend;
 use diesel::connection::{CacheSize, Instrumentation};
 use diesel::query_builder::{AsQuery, QueryFragment, QueryId};
 use diesel::row::Row;
+use diesel::sql_types::TypeMetadata;
 use diesel::{ConnectionResult, QueryResult};
-use futures_core::future::BoxFuture;
 use futures_core::Stream;
 use futures_util::FutureExt;
 use std::fmt::Debug;
 use std::future::Future;
-
-pub use scoped_futures;
-use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
+use transaction_manager::AsyncFunc;
 
 #[cfg(feature = "async-connection-wrapper")]
 pub mod async_connection_wrapper;
@@ -244,7 +242,6 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     /// ```rust
     /// # include!("doctest_setup.rs");
     /// use diesel::result::Error;
-    /// use scoped_futures::ScopedFutureExt;
     /// use diesel_async::{RunQueryDsl, AsyncConnection};
     ///
     /// # #[tokio::main(flavor = "current_thread")]
@@ -255,7 +252,7 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use schema::users::dsl::*;
     /// #     let conn = &mut establish_connection().await;
-    /// conn.transaction::<_, Error, _>(|conn| async move {
+    /// conn.transaction::<_, Error, _>(async |conn| {
     ///     diesel::insert_into(users)
     ///         .values(name.eq("Ruby"))
     ///         .execute(conn)
@@ -265,9 +262,9 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     ///
     ///     Ok(())
-    /// }.scope_boxed()).await?;
+    /// }).await?;
     ///
-    /// conn.transaction::<(), _, _>(|conn| async move {
+    /// conn.transaction::<(), _, _>(async |conn| {
     ///     diesel::insert_into(users)
     ///         .values(name.eq("Pascal"))
     ///         .execute(conn)
@@ -279,7 +276,7 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     ///     // If we want to roll back the transaction, but don't have an
     ///     // actual error to return, we can return `RollbackTransaction`.
     ///     Err(Error::RollbackTransaction)
-    /// }.scope_boxed()).await;
+    /// }).await;
     ///
     /// let all_names = users.select(name).load::<String>(conn).await?;
     /// assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
@@ -289,17 +286,17 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     fn transaction<'a, 'conn, R, E, F>(
         &'conn mut self,
         callback: F,
-    ) -> BoxFuture<'conn, Result<R, E>>
-    // we cannot use `impl Trait` here due to bugs in rustc
-    // https://github.com/rust-lang/rust/issues/100013
-    //impl Future<Output = Result<R, E>> + Send + 'async_trait
+    ) -> impl Future<Output = Result<R, E>> + Send + 'conn
     where
-        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Self) -> Result<R, E>
+            + AsyncFunc<&'r mut Self, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: From<diesel::result::Error> + Send + 'a,
         R: Send + 'a,
         'a: 'conn,
     {
-        Self::TransactionManager::transaction(self, callback).boxed()
+        Self::TransactionManager::transaction(self, callback)
     }
 
     /// Creates a transaction that will never be committed. This is useful for
@@ -334,7 +331,6 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     /// ```rust
     /// # include!("doctest_setup.rs");
     /// use diesel::result::Error;
-    /// use scoped_futures::ScopedFutureExt;
     /// use diesel_async::{RunQueryDsl, AsyncConnection};
     ///
     /// # #[tokio::main(flavor = "current_thread")]
@@ -345,7 +341,7 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     /// # async fn run_test() -> QueryResult<()> {
     /// #     use schema::users::dsl::*;
     /// #     let conn = &mut establish_connection().await;
-    /// conn.test_transaction::<_, Error, _>(|conn| async move {
+    /// conn.test_transaction::<_, Error, _>(async |conn| {
     ///     diesel::insert_into(users)
     ///         .values(name.eq("Ruby"))
     ///         .execute(conn)
@@ -355,7 +351,7 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
     ///     assert_eq!(vec!["Sean", "Tess", "Ruby"], all_names);
     ///
     ///     Ok(())
-    /// }.scope_boxed()).await;
+    /// }).await;
     ///
     /// // Even though we returned `Ok`, the transaction wasn't committed.
     /// let all_names = users.select(name).load::<String>(conn).await?;
@@ -368,21 +364,24 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
         f: F,
     ) -> impl Future<Output = R> + Send + 'conn
     where
-        F: for<'r> FnOnce(&'r mut Self) -> ScopedBoxFuture<'a, 'r, Result<R, E>> + Send + 'a,
+        for<'r> F: AsyncFnOnce(&'r mut Self) -> Result<R, E>
+            + AsyncFunc<&'r mut Self, Result<R, E>, Fut: Send>
+            + Send
+            + 'a,
         E: Debug + Send + 'a,
         R: Send + 'a,
         'a: 'conn,
     {
         use futures_util::TryFutureExt;
         let (user_result_tx, user_result_rx) = std::sync::mpsc::channel();
-        self.transaction::<R, _, _>(move |conn| {
+        self.transaction::<R, _, _>(async |conn| {
             f(conn)
                 .map_err(|_| diesel::result::Error::RollbackTransaction)
                 .and_then(move |r| {
                     let _ = user_result_tx.send(r);
                     std::future::ready(Err(diesel::result::Error::RollbackTransaction))
                 })
-                .scope_boxed()
+                .await
         })
         .then(move |_r| {
             let r = user_result_rx
@@ -405,4 +404,32 @@ pub trait AsyncConnection: AsyncConnectionCore + Sized {
 
     /// Set the prepared statement cache size to [`CacheSize`] for this connection
     fn set_prepared_statement_cache_size(&mut self, size: CacheSize);
+}
+
+/// `AsyncMultiConnectionHelper` is an async copy of `MultiConnectionHelper` trait.
+/// It is used to support async MultiConnection implementations.
+pub trait AsyncMultiConnectionHelper: AsyncConnectionCore {
+    /// Convert the lookup type to any
+    fn to_any<'a>(
+        lookup: &mut <Self::Backend as TypeMetadata>::MetadataLookup,
+    ) -> &mut (dyn std::any::Any + 'a);
+
+    /// Get the lookup type from any
+    fn from_any(
+        lookup: &mut dyn std::any::Any,
+    ) -> Option<&mut <Self::Backend as TypeMetadata>::MetadataLookup>;
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "pool")]
+macro_rules! expand_pool {
+        ($($tt:tt)*) => {$($tt)*};
+    }
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "pool"))]
+macro_rules! expand_pool {
+    ($($tt:tt)*) => {};
 }
