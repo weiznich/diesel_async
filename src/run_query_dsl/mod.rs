@@ -71,7 +71,7 @@ pub mod methods {
     /// to call `load` from generic code.
     ///
     /// [`RunQueryDsl`]: super::RunQueryDsl
-    pub trait LoadQuery<'query, Conn: AsyncConnectionCore, U>: RunQueryDsl<Conn> {
+    pub trait LoadQuery<'query, Conn: AsyncConnectionCore, U> {
         /// The future returned by [`LoadQuery::internal_load`]
         type LoadFuture<'conn>: Future<Output = QueryResult<Self::Stream<'conn>>> + Send
         where
@@ -91,7 +91,7 @@ pub mod methods {
         Conn: AsyncConnectionCore<Backend = DB>,
         U: Send,
         DB: Backend + 'static,
-        T: AsQuery + RunQueryDsl<Conn> + Send + 'query,
+        T: AsQuery + Send + 'query,
         T::Query: QueryFragment<DB> + QueryId + Send + 'query,
         T::SqlType: CompatibleType<U, DB, SqlType = ST>,
         U: FromSqlRow<ST, DB> + Send + 'static,
@@ -583,14 +583,14 @@ pub trait RunQueryDsl<Conn>: Sized {
         U: Send + 'conn,
         Conn: AsyncConnectionCore,
         Self: diesel::query_dsl::methods::LimitDsl,
-        diesel::dsl::Limit<Self>: methods::LoadQuery<'query, Conn, U> + Send + 'query,
+        diesel::dsl::Limit<Self>:
+            methods::LoadQuery<'query, Conn, U> + RunQueryDsl<Conn> + Send + 'query,
     {
         diesel::query_dsl::methods::LimitDsl::limit(self, 1).get_result(conn)
     }
 }
 
-// Use marker trait to implement RunQueryDsl
-impl<T, Conn> RunQueryDsl<Conn> for T where T: diesel::query_dsl::SupportRunQueryDsl {}
+impl<T, Conn> RunQueryDsl<Conn> for T where T: diesel::query_dsl::RunQueryDslSupport {}
 
 /// Sugar for types which implement both `AsChangeset` and `Identifiable`
 ///
