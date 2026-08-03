@@ -170,7 +170,7 @@ where
 pub struct AnsiTransactionManager {
     pub(crate) status: TransactionManagerStatus,
     // this boolean flag tracks whether we are currently in the process
-    // of executing any transaction releated SQL (BEGIN, COMMIT, ROLLBACK)
+    // of executing any transaction related SQL (BEGIN, COMMIT, ROLLBACK)
     // if we ever encounter a situation where this flag is set
     // while the connection is returned to a pool
     // that means the connection is broken as someone dropped the

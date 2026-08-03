@@ -12,7 +12,7 @@ use pin_project_lite::pin_project;
 //
 // Specifying these lifetimes results in the compiler not being
 // able to look through the generic code and emit
-// lifetime erros for pipelined queries. See
+// lifetime errors for pipelined queries. See
 // https://github.com/weiznich/diesel_async/issues/249 for more context
 pin_project! {
     #[repr(transparent)]

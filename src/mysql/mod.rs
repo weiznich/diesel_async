@@ -253,7 +253,7 @@ impl AsyncMysqlConnection {
             // we might error out on too many open statements. See https://github.com/weiznich/diesel_async/issues/26
             // and https://github.com/weiznich/diesel_async/issues/269 for details
             //
-            // We remember these statements from the last run as there is currenly no relaible way to
+            // We remember these statements from the last run as there is currently no reliable way to
             // run this as destruction step after the execution finished. Users might abort polling the future, etc
             //
             // The overhead for this is keeping one additional statement open until the connection is used
