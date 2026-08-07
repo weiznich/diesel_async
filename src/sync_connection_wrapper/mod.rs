@@ -34,7 +34,7 @@ pub trait SpawnBlocking {
 
 /// A wrapper of a [`diesel::connection::Connection`] usable in async context.
 ///
-/// It implements AsyncConnection if [`diesel::connection::Connection`] fullfils requirements:
+/// It implements AsyncConnection if [`diesel::connection::Connection`] fulfils requirements:
 /// * it's a [`diesel::connection::LoadConnection`]
 /// * its [`diesel::connection::Connection::Backend`] has a [`diesel::query_builder::BindCollector`] implementing [`diesel::query_builder::MoveableBindCollector`]
 /// * its [`diesel::connection::LoadConnection::Row`] implements [`diesel::row::IntoOwnedRow`]
@@ -76,7 +76,7 @@ pub type SyncConnectionWrapper<C, B = self::implementation::Tokio> =
 
 /// A wrapper of a [`diesel::connection::Connection`] usable in async context.
 ///
-/// It implements AsyncConnection if [`diesel::connection::Connection`] fullfils requirements:
+/// It implements AsyncConnection if [`diesel::connection::Connection`] fulfils requirements:
 /// * it's a [`diesel::connection::LoadConnection`]
 /// * its [`diesel::connection::Connection::Backend`] has a [`diesel::query_builder::BindCollector`] implementing [`diesel::query_builder::MoveableBindCollector`]
 /// * its [`diesel::connection::LoadConnection::Row`] implements [`diesel::row::IntoOwnedRow`]
@@ -378,7 +378,7 @@ mod implementation {
 
         /// Run a operation directly with the inner connection
         ///
-        /// This function is usful to register custom functions
+        /// This function is useful to register custom functions
         /// and collection for Sqlite for example
         ///
         /// # Example

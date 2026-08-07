@@ -54,7 +54,7 @@ pub enum RecyclingMethod<C> {
     /// Only check for open transactions when recycling existing connections
     /// Unless you have special needs this is a safe choice.
     ///
-    /// If the database connection is closed you will recieve an error on the first place
+    /// If the database connection is closed you will receive an error on the first place
     /// you actually try to use the connection
     Fast,
     /// In addition to checking for open transactions a test query is executed
