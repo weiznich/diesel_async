@@ -8,6 +8,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 
 * Add support for `#[derive(MultiConnection)]`
 * Bump minimal supported Rust version to 1.88.0
+* Bump minimal supported `mysql_async` version to 0.37 (pulls in a patched `lru`, RUSTSEC-2026-0253)
 
 ## [0.9.2] - 2026-06-19
 
